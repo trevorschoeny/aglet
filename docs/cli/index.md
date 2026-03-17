@@ -353,8 +353,31 @@ Greeter                       cold    0.00    0        —         —
 Check project integrity and auto-fix what it can. Scans all `block.yaml`, `surface.yaml`, `component.yaml`, and `domain.yaml` files in the project tree.
 
 ```
-aglet validate
+aglet validate [--deep] [--unit NAME] [--json]
 ```
+
+`--deep` switches to a different mode entirely — instead of running deterministic checks, it generates a **judgment-based review checklist** for an AI agent to execute. The CLI doesn't call any LLM. It produces structured instructions; the agent does the thinking. Run `aglet validate` (without `--deep`) first to clear deterministic errors, then use `--deep` for the qualitative review.
+
+### `--deep` checks
+
+| Category | Applies to | What the agent verifies |
+|---|---|---|
+| Intent accuracy | All units | `intent.md` matches what the code/prompt actually does today |
+| Schema accuracy | Process + embedded blocks | `schema.in`/`schema.out` match what the implementation reads and writes |
+| Prompt quality | Reasoning blocks | Prompt is comprehensive, handles edge cases, aligns with output schema |
+| Single responsibility | All blocks | Describable in one sentence without "and" |
+| Implementation convention | Process + embedded blocks | In/Transform/Out structure with a named block function |
+| Contract completeness | Surfaces | Every external dependency is in the contract with schema + callers |
+| Logic division | Components | Transformation logic lives in embedded blocks, not inline |
+
+Checks include **contextual notes**: stub detection, warmth/run count from behavioral memory, suspicious patterns (block name contains "and", many downstream calls). Each check lists the exact files the agent should read.
+
+### `--deep` flags
+
+| Flag | Description |
+|---|---|
+| `--unit NAME` | Scope the checklist to one unit (useful for large projects or focused reviews) |
+| `--json` | Output structured JSON for programmatic agent consumption |
 
 ### What it checks
 
@@ -414,6 +437,54 @@ These require manual intervention:
     ✗ schema mismatch with 'ScoreEmail': output is missing field 'score' required by ScoreEmail.schema.in
 
 [aglet validate] 1 issue(s) fixed, 2 error(s) remaining
+```
+
+### `--deep` example output
+
+```
+[aglet validate --deep] Scanning project...
+
+# Aglet Deep Validation — my-app
+Generated: 2026-03-17 | 3 blocks, 0 surfaces, 0 components, 1 domains | scope: full project
+
+Run this checklist against the codebase. For each item, read the listed
+files and verify the claim. Report issues as: `[UnitName] — <description>`.
+Run `aglet validate` first to clear deterministic errors before this review.
+
+---
+
+## Intent Accuracy
+
+_Verify intent.md still accurately describes what each unit does. Intent drift is invisible tech debt._
+
+- [ ] **EmailClassifier** (reasoning block)
+  Does intent.md match the actual reasoning strategy in prompt.md? Check: do the
+  classification categories in the intent match what the prompt instructs? Does
+  the prompt implement any logic not mentioned in the intent?
+  ⚠ 0 runs recorded — prompt/logic is untested in practice; scrutinize carefully
+  Files: `intelligence/EmailClassifier/intent.md`, `intelligence/EmailClassifier/prompt.md`
+
+- [ ] **PaymentAuth** (process block)
+  Does intent.md accurately describe what the block currently implements?
+  ⚠ battle-tested: 847 calls, 0.0% error rate — implementation is stable
+  Files: `auth/PaymentAuth/intent.md`, `auth/PaymentAuth/main.go`
+
+---
+
+## Prompt Quality
+
+_Verify reasoning prompts are comprehensive and handle edge cases._
+
+- [ ] **EmailClassifier** (reasoning block)
+  Is prompt.md comprehensive? Check: (1) does it handle ambiguous or missing input
+  gracefully? (2) are the constraints complete? (3) is the output schema consistent
+  with the categories described in the prompt?
+  ⚠ prompt has never been run — verify reasoning framework is sound before relying on it
+  Files: `intelligence/EmailClassifier/prompt.md`, `intelligence/EmailClassifier/block.yaml`
+
+---
+
+4 checks across 3 categories
 ```
 
 ---

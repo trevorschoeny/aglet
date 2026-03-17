@@ -58,7 +58,7 @@ Commands:
   init <ProjectName> [flags]            Bootstrap a new Aglet project
   new <type> <name> [flags]             Scaffold a new Block, Domain, Surface, or Component
   stats [BlockName] [--domain D] [--project] [--write] [--json]  Behavioral memory from logs
-  validate                              Validate project structure and consistency
+  validate [--deep] [--unit NAME] [--json]  Validate project structure and consistency
   version                               Print the aglet version
 
 `)
@@ -215,12 +215,37 @@ func handleServe() {
 }
 
 // handleValidate runs structural validation on the entire project.
+// With --deep, generates a judgment-based review checklist for an agent instead.
 func handleValidate() {
+	deep := false
+	jsonOutput := false
+	unitFilter := ""
+
+	for i := 2; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--deep":
+			deep = true
+		case "--json":
+			jsonOutput = true
+		case "--unit":
+			if i+1 < len(os.Args) {
+				i++
+				unitFilter = os.Args[i]
+			}
+		}
+	}
+
 	projectRoot, err := findProjectRoot()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
+
+	if deep {
+		RunValidateDeep(projectRoot, jsonOutput, unitFilter)
+		return
+	}
+
 	if err := RunValidate(projectRoot); err != nil {
 		os.Exit(1)
 	}
