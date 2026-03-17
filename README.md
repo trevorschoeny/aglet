@@ -85,6 +85,7 @@ aglet run <BlockName> [input.json]      # Execute a Block by name
 aglet reason <BlockDir> [input.json]    # Execute a reasoning Block directly
 aglet pipe <StartBlock> [EndBlock]      # Execute a pipeline following calls edges
 aglet serve [--port PORT]               # Start HTTP dev server from a Surface's contract
+aglet stats [BlockName] [flags]         # Behavioral memory from logs (the AML layer)
 aglet validate                          # Check project integrity and auto-fix issues
 aglet version                           # Print the installed version
 ```

@@ -36,6 +36,8 @@ func main() {
 		handleInit()
 	case "new":
 		handleNew()
+	case "stats":
+		handleStats()
 	case "version":
 		handleVersion()
 	default:
@@ -55,6 +57,7 @@ Commands:
   serve [--port PORT]                   Start an HTTP dev server from a Surface's contract
   init <ProjectName> [flags]            Bootstrap a new Aglet project
   new <type> <name> [flags]             Scaffold a new Block, Domain, Surface, or Component
+  stats [BlockName] [--domain D] [--project] [--write] [--json]  Behavioral memory from logs
   validate                              Validate project structure and consistency
   version                               Print the aglet version
 
@@ -224,17 +227,35 @@ func handleValidate() {
 }
 
 // dispatchBlock routes execution based on the Block's runtime.
+// On success, quietly updates behavioral_memory in block.yaml — the AML
+// observing passively, as the Canon intends. This is best-effort and never
+// fails the execution itself.
 func dispatchBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte) ([]byte, error) {
+	var output []byte
+	var err error
+
 	switch block.Config.Runtime {
 	case "process", "":
-		return RunProcessBlock(block, rootDomain, bytes.NewReader(input))
+		output, err = RunProcessBlock(block, rootDomain, bytes.NewReader(input))
 	case "reasoning":
-		return RunReasoningBlock(block, rootDomain, projectRoot, input)
+		output, err = RunReasoningBlock(block, rootDomain, projectRoot, input)
 	case "embedded":
 		return nil, fmt.Errorf("Block '%s' has runtime 'embedded' — embedded Blocks are internal to Surfaces and cannot be executed externally", block.Config.Name)
 	default:
 		return nil, fmt.Errorf("Block '%s' has unknown runtime '%s'", block.Config.Name, block.Config.Runtime)
 	}
+
+	// After a successful top-level run, update behavioral_memory silently.
+	// Tool calls inside reasoning use executeToolBlock — not this path — so
+	// sub-invocations don't trigger spurious memory updates.
+	// Pass nil for allBlocks: the observed_callers cross-scan is skipped here
+	// because scanning every block's logs on every run would be too expensive.
+	// It runs during explicit `aglet stats` calls instead.
+	if err == nil {
+		_ = writeBehavioralMemory(block, computeBehavioralMemory(block, nil))
+	}
+
+	return output, err
 }
 
 // readInput reads Block input from a file, stdin, or defaults to empty JSON.

@@ -16,10 +16,11 @@ type BlockYaml struct {
 		In  interface{} `yaml:"in"`
 		Out interface{} `yaml:"out"`
 	} `yaml:"schema"`
-	Calls       []string `yaml:"calls"`
-	Tools       []string `yaml:"tools"`       // Blocks callable during reasoning
-	Execution   string   `yaml:"execution"`
-	Error       string   `yaml:"error"`
+	Calls              []string          `yaml:"calls"`
+	Tools              []string          `yaml:"tools"`              // Blocks callable during reasoning
+	Execution          string            `yaml:"execution"`
+	Error              string            `yaml:"error"`
+	BehavioralMemory   *BehavioralMemory `yaml:"behavioral_memory,omitempty"` // Written by aglet stats --write
 }
 
 // DomainYaml represents the parsed domain.yaml.
@@ -45,6 +46,24 @@ type DomainDefaults struct {
 	Execution string `yaml:"execution"`
 	Error     string `yaml:"error"`
 	Model     string `yaml:"model"`
+}
+
+// BehavioralMemory holds the AML-computed behavioral profile of a Block.
+// This section is authored and maintained solely by `aglet stats --write`.
+// It lives in block.yaml alongside developer-declared fields, forming the
+// complete Semantic Overlay: declared meaning + learned behavior.
+type BehavioralMemory struct {
+	TotalCalls      int            `yaml:"total_calls" json:"total_calls"`
+	AvgRuntimeMs    float64        `yaml:"avg_runtime_ms" json:"avg_runtime_ms"`
+	ErrorRate       float64        `yaml:"error_rate" json:"error_rate"`
+	WarmthScore     float64        `yaml:"warmth_score" json:"warmth_score"`
+	WarmthLevel     string         `yaml:"warmth_level" json:"warmth_level"` // hot | warm | cold
+	LastCalled      string         `yaml:"last_called,omitempty" json:"last_called,omitempty"`
+	VersionSince    string         `yaml:"version_since,omitempty" json:"version_since,omitempty"`    // timestamp of the block.updated event that triggered the current measurement window
+	TokenAvg        int            `yaml:"token_avg,omitempty" json:"token_avg,omitempty"`            // reasoning only
+	ObservedCallees map[string]int `yaml:"observed_callees,omitempty" json:"observed_callees,omitempty"` // tool blocks invoked by this block (reasoning only)
+	ObservedCallers map[string]int `yaml:"observed_callers,omitempty" json:"observed_callers,omitempty"` // blocks that invoked this block as a tool
+	LastUpdated     string         `yaml:"last_updated" json:"last_updated"`
 }
 
 // DiscoveredBlock holds a parsed Block and its filesystem location.

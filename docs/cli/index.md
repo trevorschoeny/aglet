@@ -20,7 +20,7 @@ The CLI finds the project root by walking up from your current working directory
 
 ## aglet run
 
-Find and execute a single Block by name. The CLI scans the project tree for a `block.yaml` whose `name` field matches the argument.
+Find and execute a single Block by name. The CLI scans the project tree for a `block.yaml` whose `name` field matches the argument. On success, `behavioral_memory` in the Block's `block.yaml` is updated automatically — the AML observing passively.
 
 ```
 aglet run <BlockName> [input.json]
@@ -225,6 +225,129 @@ aglet new component ConversationList
 
 ---
 
+## aglet stats
+
+Read a Block's `logs.jsonl` and surface its behavioral profile — the AML's interface in the CLI. Stats are distilled from raw execution events: calls, duration, errors, and recency.
+
+`behavioral_memory` in `block.yaml` is updated **automatically** after every successful `aglet run` — no flags needed. The AML observes passively. `aglet stats --write` is for explicit on-demand updates (e.g., after bulk runs or in CI).
+
+```
+aglet stats [BlockName] [--domain DOMAIN] [--project] [--write] [--json]
+```
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--domain DOMAIN` | On-the-fly rollup for all blocks in a named domain (not stored) |
+| `--project` | Show the project-wide thermal map for all blocks (sorted by warmth) |
+| `--write` | Write the computed `behavioral_memory` section back into `block.yaml` |
+| `--json` | Output behavioral memory as JSON (for tooling/EI integration) |
+
+### Warmth
+
+Warmth is a single signal that combines **recency** (70%) and **frequency** (30%) into a score from 0.0–1.0:
+
+| Level | Score | Meaning |
+|---|---|---|
+| `hot` | ≥ 0.7 | Actively used and tested |
+| `warm` | 0.3–0.69 | Used occasionally, still relevant |
+| `cold` | < 0.3 | Idle or never run |
+
+A cold Block in the middle of a hot pipeline is a signal: has it been checked lately?
+
+### behavioral_memory in block.yaml
+
+`aglet run` automatically appends and updates this reserved section in `block.yaml` after each successful execution. `aglet stats --write` does the same on demand.
+
+**Accumulation model: checkpoint + delta.** Each `aglet stats` run only processes log entries newer than the previous `last_updated` checkpoint — it doesn't recount from scratch. If the block's implementation file changes (a `block.updated` event appears in `logs.jsonl` with a newer timestamp), the measurement window resets and `version_since` is updated.
+
+```yaml
+# AML — written by `aglet stats --write`, do not edit manually
+behavioral_memory:
+  total_calls: 847
+  avg_runtime_ms: 24.3
+  error_rate: 0.0012
+  warmth_score: 0.91
+  warmth_level: hot
+  last_called: "2026-03-17T21:09:05Z"
+  version_since: "2026-03-10T14:22:00Z"   # reset on last code change
+  token_avg: 1240                          # reasoning blocks only
+  observed_callees:                        # tool blocks invoked during reasoning
+    ParseDate: 423
+    ExtractEntities: 847
+  observed_callers:                        # blocks that invoked this block as a tool
+    EmailClassifier: 1270
+    TestHarness: 42
+  last_updated: "2026-03-17T21:09:10Z"
+```
+
+This is the Adaptive Memory Layer write-back: the Semantic Overlay becomes both declarative (what you declared) and behavioral (what the system learned). Any EI tool can read a single `block.yaml` and understand both.
+
+`observed_callees` and `observed_callers` create a **runtime dependency graph** — who actually calls who, with frequency. This is distinct from the declared `tools` and `calls` fields, which express design intent. `aglet validate` compares the two and flags divergence.
+
+### Examples
+
+```bash
+# Single block stats (human-readable)
+aglet stats PaymentAuth
+
+# Single block stats as JSON
+aglet stats PaymentAuth --json
+
+# Write behavioral_memory into block.yaml
+aglet stats PaymentAuth --write
+
+# Domain-level rollup (on-the-fly, not stored)
+aglet stats --domain intelligence
+
+# Project-wide thermal map — all blocks sorted by warmth
+aglet stats --project
+
+# Project-wide write-back — update all block.yaml files
+aglet stats --project --write
+```
+
+### Example output
+
+```
+Block: EmailClassifier
+──────────────────────────────────────
+  Warmth         hot   (0.91)
+  Total calls    847
+  Avg runtime    1240ms
+  Error rate     0.0%
+  Last called    2h ago
+  Version since  2026-03-10
+  Token avg      ~1240/call
+  Calls to       ParseDate ×423, ExtractEntities ×847
+  Called by      TestHarness ×42
+```
+
+```
+Domain: intelligence
+──────────────────────────────────────
+  Blocks         4
+  Warmth         warm  (0.48 avg)
+  Total calls    1247
+  Avg runtime    312ms
+  Error rate     0.8%
+  Token spend    ~1.2M tokens
+
+  Hottest        EmailClassifier  (0.91)
+  Coldest        ParseDate        (0.05)
+```
+
+```
+Block                         Warmth  Score   Calls    Avg ms    Errors
+──────────────────────────────────────────────────────────────────────
+EmailClassifier               hot     0.91    847      1240ms    0.0%
+PaymentAuth                   warm    0.52    42       24ms      0.1%
+Greeter                       cold    0.00    0        —         —
+```
+
+---
+
 ## aglet validate
 
 Check project integrity and auto-fix what it can. Scans all `block.yaml`, `surface.yaml`, `component.yaml`, and `domain.yaml` files in the project tree.
@@ -243,7 +366,7 @@ aglet validate
 | **Domain references** | Every unit's `domain` field references an existing `domain.yaml` |
 | **Block files** | Valid `runtime` value, `impl` file exists (process/embedded), `schema.in` and `schema.out` present |
 | **Reasoning blocks** | Model resolvable (block or domain default), `prompt.md` exists, tools reference valid blocks, no `main.*` file |
-| **Calls edges** | Every `calls` entry references an existing Block |
+| **Calls edges** | Every `calls` entry references an existing Block; divergence between declared `tools` and `observed_callees` in behavioral memory |
 | **Schema compatibility** | For each `calls` edge, every field required by the downstream Block's `schema.in` is present in the upstream Block's `schema.out`, with compatible types |
 | **Circular deps** | No cycles in the calls graph (DFS) |
 | **Surfaces** | Entry file exists, no nested surfaces, contract dependencies reference existing blocks/pipelines |

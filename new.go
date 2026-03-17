@@ -347,10 +347,17 @@ function %s(input: Record<string, unknown>): Record<string, unknown> {
 `, name, name)
 
 	case "py":
-		// Python uses snake_case convention for function names
+		// Python uses snake_case convention for function names.
+		// Function must be defined before the In/Transform/Out block calls it.
 		snakeName := toSnakeCase(name)
 		content = fmt.Sprintf(`import json
 import sys
+
+
+def %s(input):
+    # TODO: Implement transformation logic
+    return {}
+
 
 # In
 input_data = json.load(sys.stdin)
@@ -360,11 +367,6 @@ result = %s(input_data)
 
 # Out
 print(json.dumps(result))
-
-
-def %s(input):
-    # TODO: Implement transformation logic
-    return {}
 `, snakeName, snakeName)
 
 	default:

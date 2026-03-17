@@ -622,7 +622,8 @@ func checkReasoningBlocks(inv *ProjectInventory) []ValidationError {
 	return errors
 }
 
-// checkCallsEdges verifies that every calls reference points to an existing block.
+// checkCallsEdges verifies that every calls reference points to an existing block,
+// and checks for divergence between declared tools and observed runtime behavior.
 func checkCallsEdges(inv *ProjectInventory) []ValidationError {
 	var errors []ValidationError
 
@@ -633,6 +634,7 @@ func checkCallsEdges(inv *ProjectInventory) []ValidationError {
 	}
 
 	for _, b := range inv.Blocks {
+		// Check calls edges reference existing blocks
 		for _, callRef := range b.Config.Calls {
 			// Handle domain-qualified names: "domain/BlockName"
 			refName := callRef
@@ -644,6 +646,51 @@ func checkCallsEdges(inv *ProjectInventory) []ValidationError {
 					Unit:    b.Config.Name,
 					Message: fmt.Sprintf("calls references non-existent block '%s'", callRef),
 				})
+			}
+		}
+
+		// Divergence check: compare observed_callees (runtime) against declared tools.
+		// observed_callees is built from tool.call log events, which only occur in
+		// reasoning blocks. Divergence = signal that design and runtime have drifted.
+		// Not auto-fixable — requires a human design decision.
+		mem := b.Config.BehavioralMemory
+		if mem == nil || len(mem.ObservedCallees) == 0 {
+			continue
+		}
+
+		// Build declared tools set (unqualified names)
+		declaredTools := map[string]bool{}
+		for _, toolRef := range b.Config.Tools {
+			refName := toolRef
+			if parts := strings.Split(toolRef, "/"); len(parts) > 1 {
+				refName = parts[len(parts)-1]
+			}
+			declaredTools[refName] = true
+		}
+
+		// Undeclared runtime dependency: observed at runtime but not in tools
+		for callee := range mem.ObservedCallees {
+			if !declaredTools[callee] {
+				errors = append(errors, ValidationError{
+					Unit:    b.Config.Name,
+					Message: fmt.Sprintf("observed calling tool '%s' at runtime but it is not declared in tools", callee),
+				})
+			}
+		}
+
+		// Dead declared tool: in tools but never observed at runtime (after enough data)
+		if mem.TotalCalls > 20 {
+			for _, toolRef := range b.Config.Tools {
+				refName := toolRef
+				if parts := strings.Split(toolRef, "/"); len(parts) > 1 {
+					refName = parts[len(parts)-1]
+				}
+				if _, observed := mem.ObservedCallees[refName]; !observed {
+					errors = append(errors, ValidationError{
+						Unit:    b.Config.Name,
+						Message: fmt.Sprintf("declared tool '%s' never observed at runtime after %d calls (may be an untested or dead code path)", toolRef, mem.TotalCalls),
+					})
+				}
 			}
 		}
 	}
