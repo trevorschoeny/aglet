@@ -1,0 +1,29 @@
+{
+  "name": "aglet",
+  "version": "1.0.0",
+  "description": "A protocol for observable, agent-native software — semantic identity, traceability, and analytics built into every unit.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trevorschoeny/aglet.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/trevorschoeny/aglet/issues"
+  },
+  "homepage": "https://github.com/trevorschoeny/aglet#readme",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
