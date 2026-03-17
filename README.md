@@ -79,11 +79,28 @@ go install github.com/trevorschoeny/aglet@latest
 ### Commands
 
 ```bash
+aglet init <ProjectName>                # Bootstrap a new Aglet project
+aglet new <type> <name> [flags]         # Scaffold a Block, Domain, Surface, or Component
 aglet run <BlockName> [input.json]      # Execute a Block by name
 aglet reason <BlockDir> [input.json]    # Execute a reasoning Block directly
 aglet pipe <StartBlock> [EndBlock]      # Execute a pipeline following calls edges
 aglet serve [--port PORT]               # Start HTTP dev server from a Surface's contract
 aglet validate                          # Check project integrity and auto-fix issues
+aglet version                           # Print the installed version
+```
+
+### `aglet init` and `aglet new`
+
+```bash
+# Bootstrap a new project
+aglet init my-app
+
+# Scaffold units — domain is inferred from your current directory
+cd my-app
+aglet new domain intelligence
+cd intelligence
+aglet new block EmailClassifier --runtime reasoning
+aglet new block ScoreEmail
 ```
 
 ### `aglet validate`
@@ -101,7 +118,7 @@ $ aglet validate
 [aglet validate] 2 issue(s) found and fixed
 ```
 
-Auto-fixes include: name/folder mismatches, missing `intent.md` stubs, bidirectional contract drift, and domain parent inference from filesystem nesting.
+Auto-fixes include: name/folder mismatches, missing `intent.md` stubs, bidirectional contract drift, and domain parent inference from filesystem nesting. Schema compatibility between connected Blocks is also checked — field presence and type mismatches across `calls` edges are flagged.
 
 ## Project Structure
 

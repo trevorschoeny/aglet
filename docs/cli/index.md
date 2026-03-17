@@ -136,6 +136,95 @@ curl -X POST http://localhost:3001/contract/Analyze \
 
 ---
 
+## aglet init
+
+Bootstrap a new Aglet project. Creates a root domain directory with a `domain.yaml` and `intent.md`, ready to scaffold Blocks and Surfaces into.
+
+```
+aglet init <ProjectName> [--model <model>]
+```
+
+The generated `domain.yaml` includes default runners for Go, TypeScript, and Python, and a commented-out providers stub for easy LLM configuration.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--model <model>` | Set the default LLM model for reasoning Blocks (e.g. `claude-sonnet-4-20250514`) |
+
+### Examples
+
+```bash
+aglet init my-app
+aglet init my-app --model claude-sonnet-4-20250514
+```
+
+After running, edit `intent.md` to define your project's north star, then start adding units with `aglet new`.
+
+---
+
+## aglet new
+
+Scaffold a new unit — Block, Domain, Surface, or Component. Creates the directory and all required files in one pass so every unit is born complete.
+
+```
+aglet new <type> <name> [flags]
+```
+
+The `domain` field is inferred automatically from the nearest ancestor `domain.yaml`. Run this command from inside the domain directory where the unit should live.
+
+### Types
+
+| Type | Creates |
+|---|---|
+| `block` | `block.yaml`, `intent.md`, `main.*` (or `prompt.md` for reasoning) |
+| `domain` | `domain.yaml`, `intent.md` |
+| `surface` | `surface.yaml`, `intent.md`, `main.tsx` |
+| `component` | `component.yaml`, `intent.md`, `ComponentName.tsx` |
+
+### Block flags
+
+| Flag | Values | Default |
+|---|---|---|
+| `--runtime` | `process`, `embedded`, `reasoning` | `process` |
+| `--lang` | `go`, `ts`, `py` | `go` (process), `ts` (embedded) |
+| `--domain` | domain name | inferred from nearest `domain.yaml` |
+
+### Domain flags
+
+| Flag | Description |
+|---|---|
+| `--parent` | Parent domain name (default: inferred from nearest `domain.yaml`) |
+
+### Surface / Component flags
+
+| Flag | Description |
+|---|---|
+| `--domain` | Domain name (default: inferred from nearest `domain.yaml`) |
+
+### Examples
+
+```bash
+# Process block (Go, default)
+aglet new block FetchPage
+
+# Reasoning block
+aglet new block EmailClassifier --runtime reasoning
+
+# Embedded block (TypeScript)
+aglet new block StripSignature --runtime embedded
+
+# Python process block
+aglet new block ParseDate --lang py
+
+# Domain, surface, component
+aglet new domain intelligence
+aglet new surface TrevMailClient
+aglet new component ConversationList
+```
+
+---
+
 ## aglet validate
 
 Check project integrity and auto-fix what it can. Scans all `block.yaml`, `surface.yaml`, `component.yaml`, and `domain.yaml` files in the project tree.
@@ -155,6 +244,7 @@ aglet validate
 | **Block files** | Valid `runtime` value, `impl` file exists (process/embedded), `schema.in` and `schema.out` present |
 | **Reasoning blocks** | Model resolvable (block or domain default), `prompt.md` exists, tools reference valid blocks, no `main.*` file |
 | **Calls edges** | Every `calls` entry references an existing Block |
+| **Schema compatibility** | For each `calls` edge, every field required by the downstream Block's `schema.in` is present in the upstream Block's `schema.out`, with compatible types |
 | **Circular deps** | No cycles in the calls graph (DFS) |
 | **Surfaces** | Entry file exists, no nested surfaces, contract dependencies reference existing blocks/pipelines |
 | **Components** | `consumes` entries exist in parent surface contract, bidirectional caller/consumes consistency |
@@ -181,6 +271,7 @@ These require manual intervention:
 - Missing `schema.in` or `schema.out`
 - Invalid `runtime` value
 - Broken `calls` references
+- Schema compatibility mismatches (missing fields or type conflicts between connected Blocks)
 - Circular dependencies
 - Nested surfaces
 - Missing model with no domain default
@@ -191,13 +282,13 @@ These require manual intervention:
 [aglet validate] Scanning project...
 [aglet validate] Found 3 blocks, 1 surfaces, 2 components, 2 domains
 
-  Fixed: Greeter -> name updated to 'Greeter'
-  Fixed: Greeter -> created stub intent.md
+  ✔ Fixed: Greeter → name updated to 'Greeter'
+  ✔ Fixed: Greeter → created stub intent.md
 
   SentimentAnalyzer
-    x missing schema.out in block.yaml
-  client (surface)
-    x entry file './index.html' does not exist
+    ✗ missing schema.out in block.yaml
+  ClassifyEmail
+    ✗ schema mismatch with 'ScoreEmail': output is missing field 'score' required by ScoreEmail.schema.in
 
 [aglet validate] 1 issue(s) fixed, 2 error(s) remaining
 ```

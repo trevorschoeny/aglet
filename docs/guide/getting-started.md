@@ -17,63 +17,70 @@ go install github.com/trevorschoeny/aglet@latest
 Make sure `~/go/bin` is in your `PATH`. Verify the install:
 
 ```bash
-aglet
+aglet version
 ```
-
-You should see the command list: `run`, `reason`, `pipe`, `serve`, `validate`.
 
 ## Create a Project
 
-An Aglet project starts with a root domain. Create a directory and add two files:
+Bootstrap a new Aglet project with `aglet init`:
 
 ```bash
-mkdir my-project && cd my-project
+aglet init my-project
+cd my-project
 ```
 
-**`domain.yaml`** -- the root domain config:
+This creates two files:
+
+```
+my-project/
+├── domain.yaml   # Root domain: runners, defaults, providers stub
+└── intent.md     # Founding document placeholder
+```
+
+Open `domain.yaml` and uncomment the providers section for your LLM:
 
 ```yaml
-id: d-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+id: d-...
 name: my-project
 
 runners:
-  .py: "python3"
+  .go: "go run"
   .ts: "npx tsx"
+  .py: "python3"
 
 providers:
   anthropic:
-    env: ANTHROPIC_API_KEY
+    env: ANTHROPIC_API_KEY   # uncomment and set your key
 
 defaults:
   execution: sync
   error: propagate
-  model: claude-sonnet-4-20250514
+  # model: claude-sonnet-4-20250514
 ```
 
-The `runners` map file extensions to the commands that execute them. The `providers` section configures LLM API access for reasoning Blocks. The `defaults` section sets inheritable values for all units in this domain.
-
-**`intent.md`** -- why this project exists:
-
-```markdown
-# My Project
-
-A short description of what this project does and why it exists.
-```
-
-Every unit in Aglet has an `intent.md`. For domains, it's the vision document. For Blocks, it's more focused.
+Then open `intent.md` and replace the placeholder with your project's north star — one paragraph explaining what this system does and who it serves. Every decision you make should trace back to it.
 
 ## Create Your First Block
 
-Blocks live in directories named after them. Create a Greeter Block:
+Scaffold a Block with `aglet new`:
 
 ```bash
-mkdir Greeter
+aglet new block Greeter --lang py
 ```
 
-**`Greeter/block.yaml`**:
+This creates:
+
+```
+Greeter/
+├── block.yaml   # Identity, schema, runtime config
+├── intent.md    # Why this Block exists
+└── main.py      # Implementation stub
+```
+
+Open `Greeter/block.yaml` and fill in the schema:
 
 ```yaml
-id: b-11111111-2222-3333-4444-555555555555
+id: b-...
 name: Greeter
 description: "Greets a person by name"
 domain: my-project
@@ -101,9 +108,9 @@ schema:
       - length
 ```
 
-The `schema` section declares the Block's input/output contract using JSON Schema, inline in the YAML. The `runtime: process` means this Block is a script that reads JSON from stdin and writes JSON to stdout.
+The `schema` section declares the Block's typed input/output contract using JSON Schema, inline in the YAML. The `runtime: process` means this Block reads JSON from stdin and writes JSON to stdout.
 
-**`Greeter/intent.md`**:
+Open `Greeter/intent.md` and write why this Block exists:
 
 ```markdown
 # Greeter
@@ -111,15 +118,11 @@ The `schema` section declares the Block's input/output contract using JSON Schem
 Takes a person's name and produces a personalized greeting.
 ```
 
-**`Greeter/main.py`**:
+Then replace the stub in `Greeter/main.py` with the real implementation:
 
 ```python
 import json
 import sys
-
-def Greeter(data):
-    name = data.get("name", "World")
-    return {"greeting": f"Hello, {name}!", "length": len(name)}
 
 # In
 input_data = json.load(sys.stdin)
@@ -129,9 +132,14 @@ result = Greeter(input_data)
 
 # Out
 json.dump(result, sys.stdout)
+
+
+def Greeter(data):
+    name = data.get("name", "World")
+    return {"greeting": f"Hello, {name}!", "length": len(name)}
 ```
 
-The implementation follows a simple pattern: read JSON from stdin, transform it, write JSON to stdout. Any language works -- Python, Go, Node, Rust, shell scripts. As long as it reads stdin and writes stdout, Aglet can run it.
+The implementation follows a simple pattern: read JSON from stdin, transform it, write JSON to stdout. Any language works — Python, Go, TypeScript, Rust, shell scripts. As long as it reads stdin and writes stdout, Aglet can run it.
 
 ## Run It
 
@@ -157,7 +165,7 @@ aglet run Greeter input.json
 aglet validate
 ```
 
-This scans every unit in the project and checks for structural issues: missing `intent.md` files, name/folder mismatches, broken `calls` references, invalid UUIDs, circular dependencies, and more. Some issues are auto-fixed (like creating a missing `intent.md` stub). Others require manual attention.
+This scans every unit in the project and checks for structural issues: missing `intent.md` files, name/folder mismatches, broken `calls` references, invalid UUIDs, circular dependencies, schema compatibility between connected Blocks, and more. Some issues are auto-fixed (like creating a missing `intent.md` stub). Others require manual attention.
 
 Run validate early and often. It catches design-layer drift before it becomes a problem.
 
