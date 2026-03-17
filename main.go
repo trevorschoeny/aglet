@@ -32,6 +32,8 @@ func main() {
 		handleServe()
 	case "validate":
 		handleValidate()
+	case "new":
+		handleNew()
 	case "version":
 		handleVersion()
 	default:
@@ -49,6 +51,7 @@ Commands:
   reason <BlockDir> [input.json]        Execute a reasoning Block directly from its directory
   pipe <StartBlock> [EndBlock]          Execute a pipeline by following calls edges
   serve [--port PORT]                   Start an HTTP dev server from a Surface's contract
+  new <type> <name> [flags]             Scaffold a new Block, Domain, Surface, or Component
   validate                              Validate project structure and consistency
   version                               Print the aglet version
 
