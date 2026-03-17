@@ -55,10 +55,19 @@ func handleInit() {
 		os.Exit(1)
 	}
 
+	// Write CLAUDE.md — the agent context file that tells AI agents about this project
+	claudePath := filepath.Join(projectDir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte(rootCLAUDEMd(projectName)), 0644); err != nil {
+		os.RemoveAll(projectDir)
+		fmt.Fprintf(os.Stderr, "Error: could not write CLAUDE.md: %s\n", err)
+		os.Exit(1)
+	}
+
 	// Report what was created
 	fmt.Fprintf(os.Stderr, "[aglet init] Created project '%s'\n", projectName)
 	fmt.Fprintf(os.Stderr, "  %s/domain.yaml\n", projectName)
 	fmt.Fprintf(os.Stderr, "  %s/intent.md\n", projectName)
+	fmt.Fprintf(os.Stderr, "  %s/CLAUDE.md\n", projectName)
 	fmt.Fprintf(os.Stderr, "\nNext steps:\n")
 	fmt.Fprintf(os.Stderr, "  cd %s\n", projectName)
 	fmt.Fprintf(os.Stderr, "  Edit intent.md          — define your project's north star\n")
@@ -120,6 +129,54 @@ TODO: Things that must never be compromised, no matter what.
 
 TODO: The intended audience and their needs.
 `, name)
+}
+
+// rootCLAUDEMd produces the CLAUDE.md for a new project.
+// This file is the agent context file — it tells AI agents (Claude Code, etc.) that
+// this is an Aglet project and where to find the full specification.
+// It's intentionally lean: the full spec lives at the docs URL, not embedded here.
+func rootCLAUDEMd(name string) string {
+	bt := "`"
+	fence := "```"
+	return fmt.Sprintf("# %s\n"+
+		"\n"+
+		"This is an [Aglet](https://github.com/trevorschoeny/aglet) project.\n"+
+		"\n"+
+		"Aglet is a protocol for self-describing, agent-native computation. Applications are composed of **Blocks** (stateless logic units), **Surfaces** (stateful frontends), **Components** (UI building blocks), and **Domains** (organizational groupings). Every unit carries an identity file (block.yaml, surface.yaml, etc.) and an intent.md explaining why it exists.\n"+
+		"\n"+
+		"## Full Specification\n"+
+		"\n"+
+		"https://trevorschoeny.github.io/aglet/\n"+
+		"\n"+
+		"Read the spec before creating, modifying, or scaffolding any Blocks, Surfaces, Components, or Domains. The spec covers unit types, file schemas, runtime behaviors, the contract system, and the Adaptive Memory Layer (AML).\n"+
+		"\n"+
+		"## Quick Reference\n"+
+		"\n"+
+		"- **Block** — a directory with %sblock.yaml%s. JSON in, JSON out. Three runtimes: process, embedded, reasoning.\n"+
+		"- **Surface** — a directory with %ssurface.yaml%s. A deployable frontend with a typed contract to its Block dependencies.\n"+
+		"- **Component** — a directory with %scomponent.yaml%s. A stateful unit inside a Surface.\n"+
+		"- **Domain** — a directory with %sdomain.yaml%s. Organizational grouping; carries config that children inherit.\n"+
+		"- **intent.md** — every unit has one. The *why* document. Read it before touching anything.\n"+
+		"\n"+
+		"## CLI\n"+
+		"\n"+
+		"Install: %sgo install github.com/trevorschoeny/aglet@latest%s\n"+
+		"\n"+
+		"%sbash\n"+
+		"aglet run <BlockName>          # Execute a Block by name\n"+
+		"aglet pipe <StartBlock>        # Execute a pipeline (follows calls edges)\n"+
+		"aglet serve                    # HTTP dev server for Surface development\n"+
+		"aglet validate                 # Check project structure, auto-fix what it can\n"+
+		"aglet validate --deep          # Generate judgment-based checklist for agent review\n"+
+		"aglet stats <BlockName>        # Behavioral memory from runtime logs\n"+
+		"aglet new block <Name>         # Scaffold a new Block\n"+
+		"aglet new surface <Name>       # Scaffold a new Surface\n"+
+		"%s\n",
+		name,
+		bt, bt, bt, bt, bt, bt, bt, bt, // 8 backtick pairs for inline code
+		bt, bt,    // install line
+		fence, fence, // code block
+	)
 }
 
 // printInitUsage prints help for `aglet init`.
