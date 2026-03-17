@@ -74,6 +74,7 @@ func RunValidate(projectRoot string) error {
 	allErrors = append(allErrors, checkBlockFiles(inv)...)
 	allErrors = append(allErrors, checkReasoningBlocks(inv)...)
 	allErrors = append(allErrors, checkCallsEdges(inv)...)
+	allErrors = append(allErrors, checkSchemaCompatibility(inv)...)
 	allErrors = append(allErrors, checkCircularDeps(inv)...)
 	allErrors = append(allErrors, checkSurfaces(inv)...)
 	allErrors = append(allErrors, checkComponents(inv)...)
