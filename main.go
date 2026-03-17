@@ -6,12 +6,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 )
 
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
+	}
+
+	// Support --version and -v as top-level flags before the command switch
+	if os.Args[1] == "--version" || os.Args[1] == "-v" {
+		handleVersion()
+		return
 	}
 
 	switch os.Args[1] {
@@ -25,6 +32,8 @@ func main() {
 		handleServe()
 	case "validate":
 		handleValidate()
+	case "version":
+		handleVersion()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
 		printUsage()
@@ -40,9 +49,22 @@ Commands:
   reason <BlockDir> [input.json]        Execute a reasoning Block directly from its directory
   pipe <StartBlock> [EndBlock]          Execute a pipeline by following calls edges
   serve [--port PORT]                   Start an HTTP dev server from a Surface's contract
-  validate                             Validate project structure and consistency
+  validate                              Validate project structure and consistency
+  version                               Print the aglet version
 
 `)
+}
+
+// handleVersion prints the installed version of aglet.
+// When installed via `go install github.com/trevorschoeny/aglet@vX.Y.Z`, Go embeds
+// the module version automatically — no build flags needed.
+// In local/dev builds (go run ., go build without a tag), it prints "(dev build)".
+func handleVersion() {
+	version := "dev"
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+	fmt.Printf("aglet %s\n", version)
 }
 
 // handleRun finds a Block by name in the project and executes it.
