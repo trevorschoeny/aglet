@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Aglet',
-  description: 'A protocol for observable, agent-native software',
+  description: 'A protocol for self-describing, agent-native software',
 
   // Deploy to GitHub Pages at /aglet/
   base: '/aglet/',
@@ -27,11 +27,11 @@ export default defineConfig({
     sidebar: {
       '/guide/': [
         {
-          text: 'Introduction',
+          text: 'Guide',
           items: [
             { text: 'What is Aglet?', link: '/guide/what-is-aglet' },
             { text: 'Getting Started', link: '/guide/getting-started' },
-            { text: 'Core Concepts', link: '/guide/core-concepts' },
+            { text: 'How It Works', link: '/guide/how-it-works' },
             { text: 'Agent Setup', link: '/guide/agent-setup' },
           ]
         }
@@ -42,11 +42,12 @@ export default defineConfig({
           items: [
             { text: 'Blocks', link: '/spec/blocks' },
             { text: 'Surfaces', link: '/spec/surfaces' },
+            { text: 'Components', link: '/spec/components' },
             { text: 'Domains', link: '/spec/domains' },
             { text: 'Intent', link: '/spec/intent' },
-            { text: 'Guardrails', link: '/spec/guardrails' },
-            { text: 'Adaptive Memory Layer', link: '/spec/aml' },
             { text: 'Runtime Architecture', link: '/spec/runtime' },
+            { text: 'Adaptive Memory Layer', link: '/spec/aml' },
+            { text: 'Guardrails', link: '/spec/guardrails' },
           ]
         }
       ],
@@ -55,22 +56,6 @@ export default defineConfig({
           text: 'CLI Reference',
           items: [
             { text: 'Commands', link: '/cli/' },
-          ]
-        }
-      ],
-      '/patterns/': [
-        {
-          text: 'Patterns',
-          items: [
-            { text: 'Overview', link: '/patterns/' },
-          ]
-        }
-      ],
-      '/examples/': [
-        {
-          text: 'Examples',
-          items: [
-            { text: 'Overview', link: '/examples/' },
           ]
         }
       ],

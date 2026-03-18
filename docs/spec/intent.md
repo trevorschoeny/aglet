@@ -154,3 +154,12 @@ When making high-level architectural decisions -- which Blocks to create, how to
 For Surfaces, the Surface's own `intent.md` is the equivalent authority for frontend decisions. If a UX choice conflicts with the Surface intent's vision, the vision wins.
 
 Intent documents are not executable units. They are the north star that every unit within their scope exists in service of.
+
+## How Agents Use Intent
+
+An AI agent reads `intent.md` before modifying code. It gives the agent context that implementation code alone can't provide:
+
+- **Before modifying a Block**: the intent tells the agent what matters about this Block, what trade-offs were made, and what constraints exist. A change that improves performance but violates a sacred constraint should be flagged.
+- **Before generating tests**: the intent tells the agent which edge cases matter. A Block that handles financial transactions has different testing priorities than a formatter.
+- **Before suggesting architecture changes**: the intent tells the agent which units are load-bearing and which are auxiliary. Reorganizing auxiliary Blocks is low-risk; reorganizing the Block that the root intent depends on is high-risk.
+- **During `aglet validate --deep`**: the deep checklist includes "does this intent.md match the current implementation?" as a review question. Drift between intent and code is a signal worth acting on.

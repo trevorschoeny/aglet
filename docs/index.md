@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: Aglet
-  text: Observable, agent-native software
-  tagline: A protocol for self-describing computation — semantic identity, traceability, and analytics built into every unit.
+  text: Self-describing, agent-native software
+  tagline: A protocol where every unit of computation carries its identity, intent, typed schemas, and behavioral memory — readable by humans, agents, and infrastructure alike.
   actions:
     - theme: brand
       text: What is Aglet?
@@ -16,11 +16,11 @@ hero:
       link: https://github.com/trevorschoeny/aglet
 features:
   - title: Self-Describing Units
-    details: Every Block carries its identity, intent, typed schemas, and edges. Any infrastructure that can read block.yaml can host it.
+    details: Every Block carries its identity, schemas, edges, and intent in YAML. Any infrastructure that can read the file can host the Block.
   - title: Observable by Default
-    details: Semantic metadata on every unit means discovery, traceability, and analytics are natural consequences of the structure.
+    details: Every execution is wrapped with logging, version tracking, and behavioral memory. The system learns about itself as it runs.
   - title: Agent-Native
-    details: Designed for AI agents to understand, navigate, and build with. Your agent reads the same metadata you do.
-  - title: Language Agnostic
-    details: Process Blocks speak stdin/stdout JSON. Reasoning Blocks speak natural language. Any language with a runner works.
+    details: AI agents read the same metadata you do — schemas, intent, behavioral profiles. The codebase explains itself without tribal knowledge.
+  - title: The Semantic Overlay
+    details: Declared identity (what you designed) plus behavioral memory (what actually happens) live in the same file. Design and reality stay in sync.
 ---

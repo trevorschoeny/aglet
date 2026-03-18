@@ -84,17 +84,44 @@ warmth_score = (recency × 0.7) + (frequency × 0.3)
 
 Warmth is recalculated on every stats write. It's a snapshot of the Block's health at a point in time, not a historical average.
 
+## What logs.jsonl Looks Like
+
+Every Block accumulates log entries in `logs.jsonl`. Each line is one JSON event:
+
+```jsonl
+{"event":"block.start","ts":"2026-03-17T21:09:00Z","status":"info","source":"aglet","block":"EmailClassifier","block_id":"b-9f8e7d6c...","runtime":"reasoning","model":"claude-sonnet-4-20250514"}
+{"event":"tool.call","ts":"2026-03-17T21:09:01Z","status":"info","source":"aglet","block":"EmailClassifier","tool":"ParseDate","iteration":1}
+{"event":"tool.result","ts":"2026-03-17T21:09:01Z","status":"info","source":"aglet","block":"EmailClassifier","tool":"ParseDate","duration_ms":45,"success":true}
+{"event":"block.complete","ts":"2026-03-17T21:09:02Z","status":"success","source":"aglet","block":"EmailClassifier","block_id":"b-9f8e7d6c...","duration_ms":2100,"output_bytes":156,"input_tokens":340,"output_tokens":89}
+```
+
+The AML reads these events to compute behavioral memory. The wrapper writes them; the AML consumes them.
+
 ## Incremental Accumulation
 
-The AML doesn't recount logs from scratch on every run. It uses a checkpoint-and-delta model:
+The AML doesn't recount logs from scratch on every run. It uses a checkpoint-and-delta model.
 
-1. **Read** the existing `behavioral_memory` from `block.yaml` -- the last checkpoint.
+### How it works
+
+1. **Read** the existing `behavioral_memory` from `block.yaml` — the last checkpoint.
 2. **Scan** `logs.jsonl` for the most recent `block.updated` event (a code change).
 3. **Determine the window:**
    - If no existing memory, or if `block.updated` is newer than `last_updated` → **reset** (start fresh from the code change event).
    - Otherwise → **increment** (process only entries newer than `last_updated`).
 4. **Compute** new counts from the delta entries and add them to the checkpoint.
 5. **Write** the new snapshot back to `block.yaml`.
+
+### Worked example
+
+A Block has `behavioral_memory` with `total_calls: 100`, `avg_runtime_ms: 25.0`, `last_updated: "2026-03-17T20:00:00Z"`. Since then, three new entries appeared in `logs.jsonl`:
+
+- `block.complete` at 20:30 — duration 30ms
+- `block.complete` at 21:00 — duration 20ms
+- `block.error` at 21:05
+
+The AML processes only these three entries. New total_calls: 103. New avg_runtime_ms: recomputed from 100 previous calls averaging 25ms plus 2 new completed calls (30ms, 20ms). New error_rate: 1/103. The other 97 entries in the log are untouched.
+
+If the developer then modifies the Block's code and runs it again, the wrapper detects the file hash change, logs `block.updated`, and the next stats computation resets — starting fresh from that point.
 
 This means the AML processes only new log entries on each call. A Block with millions of historical entries and ten new runs since the last stats write processes ten entries, not millions.
 

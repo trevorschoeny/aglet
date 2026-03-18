@@ -4,69 +4,60 @@ title: What is Aglet?
 
 # What is Aglet?
 
-Aglet is a protocol for self-describing computation.
+Most software is opaque. To understand what a function does, you read its code. To understand how functions connect, you trace call graphs. To understand what's actually running in production, you check dashboards that live outside the codebase. To understand *why* something was built, you hope someone wrote a comment.
 
-A Block is to Aglet what a cell is to life — locally self-contained, yet constantly signaling the whole. Every unit of work carries its own identity, intent, typed schemas, and wiring metadata. This isn't decoration — it's the protocol itself. The metadata is the organism's DNA: it tells you who this unit is, what it does, and what it may touch.
+Aglet makes software that describes itself.
 
-Any infrastructure that can read a `block.yaml`, send JSON matching the input schema, and receive JSON matching the output schema can host an Aglet Block. No SDK. No runtime dependency. Just structured data in, structured data out.
+## The Core Idea
 
-## Two Layers, Always in Sync
+Every piece of an Aglet application carries its own identity file — a YAML document that says what the unit is, what it accepts, what it produces, what it connects to, and how it wants to be observed. Every unit also has an `intent.md` explaining *why* it exists. Together with typed schemas and runtime logs, the result is a system where any reader — human or AI — can understand the entire application by reading its files.
 
-An Aglet project has two layers that move together:
+This creates two layers of knowledge about every unit:
 
-**The design layer** is YAML and Markdown. It declares what each unit is (`block.yaml`, `surface.yaml`, `component.yaml`, `domain.yaml`), why it exists (`intent.md`), and how it connects to other units (`calls` edges, `contract` dependencies). This layer is the source of truth for identity, schemas, and data flow.
+**The declared layer** — what you designed. Identity, schemas, edges, role, intent. This is authored by you and lives in YAML and markdown files that are version-controlled, diffable, and reviewable.
 
-**The code layer** is the implementation. A Python script, a Go binary, a prompt file for an LLM -- whatever actually does the work. The code layer serves the design layer, not the other way around.
+**The behavioral layer** — what actually happens. Call counts, latency, error rates, warmth, observed dependencies. This is written by the runtime and accumulates in the same YAML files over time.
 
-When these two layers drift apart, `aglet validate` catches it. When they're in sync, every unit in your project is discoverable, traceable, and independently deployable.
+Together, they form the **Semantic Overlay**: a complete, self-describing picture of every unit in your application. Not just the design intent, but the operational reality.
 
-## The Core Protocol
+## What You Build With
 
-The protocol is simple:
+An Aglet project has four kinds of units:
 
-1. A directory contains a `block.yaml` with a typed UUID, a name, input/output schemas, and a runtime declaration.
-2. You send JSON matching the input schema to that Block.
-3. You receive JSON matching the output schema back.
+**Blocks** are the computation. Each Block reads JSON in, transforms it, and writes JSON out. Blocks come in three runtimes: process (scripts that run as subprocesses), reasoning (LLM prompts that execute via API), and embedded (pure functions inside frontends). Every Block has typed input/output schemas and declares its edges to other Blocks.
 
-That's it. The Block doesn't know or care who called it, what infrastructure it's running on, or whether it's being orchestrated by a CLI, a cloud function, or a cURL command. The metadata makes it self-describing. The schemas make it interoperable. The protocol makes it portable.
+**Surfaces** are the frontends. A Surface is an entire deployable application — a web app, dashboard, or mobile client. It declares a **contract**: a typed specification of every backend Block it depends on. The system reads this contract to generate HTTP endpoints automatically.
 
-## Observable by Default
+**Components** are the UI building blocks inside Surfaces. They handle orchestration — when to fetch data, when to update state, when to trigger navigation. Transformation logic always goes in embedded Blocks, not in Components.
 
-Aglet doesn't bolt observability on after the fact. Every unit has:
+**Domains** are the organizational layer. A Domain carries configuration (language runners, LLM providers, defaults) and groups related units. Domains nest fractally — a sub-domain inherits from its parent. The root domain is the project itself.
 
-- **Semantic identity** — a typed UUID (`b-` for Blocks, `s-` for Surfaces, `c-` for Components, `d-` for Domains) and a human-readable name
-- **Typed schemas** — JSON Schema for inputs and outputs, declared inline in the YAML
-- **Intent** — a Markdown document explaining *why* this unit exists
-- **Edges** — `calls` fields declaring which Blocks flow into which, `contract` sections declaring what data Surfaces need
+## What Makes It Different
 
-Discovery, traceability, and analytics aren't features you build on top. They're natural consequences of the structure.
+**Self-describing.** A Block's `block.yaml` contains everything needed to understand, execute, and integrate the Block — without reading its implementation. Identity, schemas, edges, observability contract, and behavioral memory, all in one file.
 
-This has a deeper implication: because every unit is self-describing, an entire ecosystem of tooling — analytics dashboards, compliance checks, dependency visualization, cost analysis — becomes possible *without Aglet itself building any of it*. Aglet provides the substrate. The intelligence layer is an open field.
+**Observable by default.** Every Block execution is wrapped with automatic logging: start events, completion events, error events, stderr capture, version tracking, and behavioral memory updates. The observe contract lets each Block declare which events it cares about. Surfaces get their own logs from both server-side contract calls and client-side SDK events.
 
-## Agent-Native
+**Agent-native.** The same metadata that makes the protocol work for machines makes it work for AI agents. An agent reading `block.yaml` sees the schemas, the intent, the edges, and the behavioral profile. It knows what changed, what's hot, what's cold, and what depends on what — before reading a single line of code.
 
-The metadata that makes Aglet observable to humans makes it equally legible to AI agents. An agent can read `block.yaml` to understand what a unit does, `intent.md` to understand why, `calls` edges to understand how units connect, and input/output schemas to understand the data contract. No special tooling required — the project describes itself.
+**Language-agnostic.** Process Blocks speak stdin/stdout — any language with a runner works. Reasoning Blocks speak natural language — the prompt is the implementation. The contract is JSON Schema. The only language requirement is that you can read JSON and write JSON.
 
-Aglet doesn't build its own agent. Every programmer already has one — Claude Code, Cursor, Copilot, or something else entirely. Aglet's job is to make *your* agent dramatically more effective by giving it a codebase that speaks for itself. Transparency over abstraction. The code breathes back.
+## How It All Connects
 
-## The CLI is a Dev Toolkit
+The pieces build on each other:
 
-The `aglet` CLI (`aglet run`, `aglet pipe`, `aglet serve`, `aglet validate`) is a development convenience. It's useful. It's not required. Blocks don't depend on it to execute. The CLI reads the same YAML metadata that any other system could read, and dispatches execution the same way any other system could.
+1. **You scaffold units** with `aglet new` — each born complete with identity, intent, and observability.
+2. **You run Blocks** and the wrapper observes — logging events, tracking code changes, updating behavioral memory.
+3. **You connect Blocks** via `calls` edges — the wrapper handles pipeline propagation automatically.
+4. **You serve Surfaces** via the domain listener — one entry point for frontend and backend, with SDK config injection.
+5. **The AML accumulates** — behavioral memory grows with every run, building the Semantic Overlay.
+6. **You validate** — structural checks catch drift between design and reality.
+7. **Agents read it all** — YAML + intent + behavioral memory = a codebase that explains itself.
 
-Think of it like `go run` — helpful for development, but your Go code doesn't depend on it existing.
+For the full walkthrough of how these pieces work together, see [How It Works](/guide/how-it-works).
 
-## The Taxonomy
+## Next Steps
 
-Aglet has four unit types:
-
-**Blocks** are stateless, single-responsibility computation. JSON in, JSON out. Each Block is a self-contained capsule of logic — everything needed for independent existence lives in its directory. They come in three runtimes:
-
-- **Process** — a script or binary that reads stdin, writes stdout. Any language.
-- **Embedded** — pure functions that live inside Surfaces. Internal building blocks, not externally callable.
-- **Reasoning** — an LLM call where `prompt.md` is the implementation and the model is the runtime. Can use other Blocks as tools.
-
-**Surfaces** are stateful frontends. They define a `contract` that maps dependency names to Blocks or pipelines, bridging the frontend/backend boundary with typed schemas.
-
-**Components** are the building blocks of Surfaces. Stateful units that declare which contract dependencies they `consume`.
-
-**Domains** organize everything. They carry config inheritance (runners, providers, defaults) and compose fractally — a domain can contain sub-domains, which inherit and override their parent's configuration. The same structure works at every scale, from a single-developer project to a planetary network of services.
+- **[Getting Started](/guide/getting-started)** — Build your first Aglet project in 10 minutes.
+- **[How It Works](/guide/how-it-works)** — The full picture of execution, observation, and connection.
+- **[Agent Setup](/guide/agent-setup)** — Set up your AI agent to work with Aglet metadata.

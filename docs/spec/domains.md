@@ -222,6 +222,12 @@ request that touches user data or financial operations passes
 through this domain first. Auth is the trust boundary.
 ```
 
+## When to Create a Sub-Domain
+
+Create a sub-domain when a group of Blocks has distinct configuration needs (different default model, different error policy), distinct deployment needs (separate listener, separate peers), or distinct organizational identity (different team, different intent).
+
+Don't create sub-domains for purely structural grouping — folders work fine for that. A sub-domain should carry its own `intent.md` with a coherent reason for existing as a separate unit. If you can't write that intent, it's probably just a folder.
+
 ## Parent Field and Directory Structure
 
 **The domain hierarchy is declared in YAML, not derived from folder nesting.** The `parent` field in `domain.yaml` is the source of truth. Folders should mirror the declared hierarchy for readability, but if they diverge, the YAML is correct and the folder should be moved to match.
