@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +69,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	// Only pre-warm if forwarding is enabled (default).
 	var preWarmed []*PreWarmedBlock
 	if opts.ForwardCalls && len(block.Config.Calls) > 0 {
-		preWarmed = preWarmDownstream(block.Config.Calls, projectRoot)
+		preWarmed = preWarmDownstream(block.Config.Calls, projectRoot, rootDomain)
 	}
 
 	// --- Step 4: Execute via the appropriate executor ---
@@ -147,15 +150,22 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 // PreWarmedBlock holds a resolved block that's ready to receive input.
 // Pre-warming happens concurrently with the parent block's execution
 // so downstream blocks have zero cold-start delay.
+//
+// A block can be either local (resolved from the filesystem) or remote
+// (routed via the domain's peers table). The Remote flag distinguishes them.
 type PreWarmedBlock struct {
-	Block *DiscoveredBlock
-	Error error // Non-nil if the block couldn't be resolved
+	Name     string             // Block name (always set)
+	Block    *DiscoveredBlock   // Non-nil for local blocks
+	PeerURL  string             // Non-empty for remote blocks (peer domain URL)
+	Remote   bool               // True if this block is in a remote domain
+	Error    error              // Non-nil if the block couldn't be resolved at all
 }
 
 // preWarmDownstream concurrently resolves all blocks in the calls list.
-// Each block is discovered and parsed (block.yaml loaded) but NOT executed.
-// Returns a slice of pre-warmed blocks ready for forwardToCalls.
-func preWarmDownstream(calls []string, projectRoot string) []*PreWarmedBlock {
+// Each block is discovered locally if possible. If not found locally and
+// the domain has peers configured, the block is marked as remote with
+// the appropriate peer URL.
+func preWarmDownstream(calls []string, projectRoot string, rootDomain *DomainYaml) []*PreWarmedBlock {
 	warmed := make([]*PreWarmedBlock, len(calls))
 	var wg sync.WaitGroup
 
@@ -163,8 +173,34 @@ func preWarmDownstream(calls []string, projectRoot string) []*PreWarmedBlock {
 		wg.Add(1)
 		go func(idx int, blockName string) {
 			defer wg.Done()
+
+			// Try to resolve locally first
 			block, err := FindBlock(projectRoot, blockName)
-			warmed[idx] = &PreWarmedBlock{Block: block, Error: err}
+			if err == nil {
+				warmed[idx] = &PreWarmedBlock{Name: blockName, Block: block}
+				return
+			}
+
+			// Not found locally — check if any peer domain might have it.
+			// Block names can be domain-qualified: "payments/PaymentAuth".
+			// The domain prefix maps to a peer URL.
+			if rootDomain.Peers != nil {
+				peerURL := resolvePeerForBlock(blockName, rootDomain.Peers)
+				if peerURL != "" {
+					warmed[idx] = &PreWarmedBlock{
+						Name:    blockName,
+						PeerURL: peerURL,
+						Remote:  true,
+					}
+					return
+				}
+			}
+
+			// Not found locally or in peers
+			warmed[idx] = &PreWarmedBlock{
+				Name:  blockName,
+				Error: fmt.Errorf("block '%s' not found locally or in peers", blockName),
+			}
 		}(i, name)
 	}
 
@@ -172,17 +208,36 @@ func preWarmDownstream(calls []string, projectRoot string) []*PreWarmedBlock {
 	return warmed
 }
 
+// resolvePeerForBlock checks if a block name maps to a peer domain.
+// Handles domain-qualified names like "payments/PaymentAuth" by extracting
+// the domain prefix and looking it up in peers.
+// Also does a simple check: if the block name itself matches a peer domain
+// name, return that peer (for future use).
+func resolvePeerForBlock(blockName string, peers map[string]string) string {
+	// Check for domain-qualified name: "payments/PaymentAuth"
+	if idx := strings.Index(blockName, "/"); idx > 0 {
+		domainPrefix := blockName[:idx]
+		if url, ok := peers[domainPrefix]; ok {
+			return url
+		}
+	}
+
+	// No match — the block can't be routed via peers
+	return ""
+}
+
 // forwardToCalls sends the output to all pre-warmed downstream blocks.
 //
-// For a single downstream block (linear pipeline), it calls WrapBlock on
-// that block and returns its final output — enabling chains to auto-propagate
-// (A → B → C → D, each wrapper forwarding to the next).
+// For a single downstream block (linear pipeline), it executes and returns
+// the final output — enabling chains to auto-propagate (A → B → C → D).
 //
 // For multiple downstream blocks (fan-out), all blocks execute concurrently.
-// We return nil for the output (the caller uses its own output) since fan-out
-// doesn't have a single "final" result.
+// We return nil for the output (the caller uses its own output).
+//
+// Remote blocks are forwarded via HTTP POST to the peer domain's listener.
+// Local blocks are forwarded via WrapBlock directly.
 func forwardToCalls(preWarmed []*PreWarmedBlock, output []byte, rootDomain *DomainYaml, projectRoot string) ([]byte, error) {
-	// Filter out any blocks that failed to resolve during pre-warming
+	// Filter out any blocks that failed to resolve
 	var ready []*PreWarmedBlock
 	for _, pw := range preWarmed {
 		if pw.Error != nil {
@@ -196,31 +251,66 @@ func forwardToCalls(preWarmed []*PreWarmedBlock, output []byte, rootDomain *Doma
 		return nil, nil
 	}
 
-	// Linear pipeline: single downstream block — execute and return its output.
-	// The downstream block's wrapper will in turn forward to ITS calls,
-	// so the entire chain propagates automatically.
+	// Linear pipeline: single downstream block
 	if len(ready) == 1 {
-		return WrapBlock(ready[0].Block, rootDomain, projectRoot, output)
+		return executePreWarmed(ready[0], output, rootDomain, projectRoot)
 	}
 
-	// Fan-out: multiple downstream blocks — execute concurrently.
-	// Each block runs independently. We don't aggregate results because
-	// fan-out means the data is being distributed, not piped.
+	// Fan-out: multiple downstream blocks — execute concurrently
 	var wg sync.WaitGroup
 	for _, pw := range ready {
 		wg.Add(1)
-		go func(block *DiscoveredBlock) {
+		go func(target *PreWarmedBlock) {
 			defer wg.Done()
-			_, err := WrapBlock(block, rootDomain, projectRoot, output)
+			_, err := executePreWarmed(target, output, rootDomain, projectRoot)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "[aglet] warning: downstream block '%s' failed: %s\n", block.Config.Name, err)
+				fmt.Fprintf(os.Stderr, "[aglet] warning: downstream block '%s' failed: %s\n", target.Name, err)
 			}
-		}(pw.Block)
+		}(pw)
 	}
 	wg.Wait()
 
-	// Fan-out: return nil so the caller uses its own output
 	return nil, nil
+}
+
+// executePreWarmed runs a pre-warmed block — either locally via WrapBlock
+// or remotely via HTTP POST to the peer domain's listener.
+func executePreWarmed(pw *PreWarmedBlock, input []byte, rootDomain *DomainYaml, projectRoot string) ([]byte, error) {
+	if pw.Remote {
+		return callRemoteBlock(pw.PeerURL, pw.Name, input)
+	}
+	return WrapBlock(pw.Block, rootDomain, projectRoot, input)
+}
+
+// callRemoteBlock forwards a block invocation to a remote domain's listener
+// via HTTP POST. This is the cross-domain routing mechanism — the wrapper
+// sends the output to the peer domain's /block/{name} endpoint.
+func callRemoteBlock(peerURL, blockName string, input []byte) ([]byte, error) {
+	// Extract the block name without domain prefix for the remote endpoint
+	// "payments/PaymentAuth" → "PaymentAuth"
+	remoteName := blockName
+	if idx := strings.Index(blockName, "/"); idx > 0 {
+		remoteName = blockName[idx+1:]
+	}
+
+	url := strings.TrimSuffix(peerURL, "/") + "/block/" + remoteName
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(input))
+	if err != nil {
+		return nil, fmt.Errorf("remote call to %s failed: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remote response from %s: %w", url, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remote block '%s' at %s returned status %d: %s", blockName, peerURL, resp.StatusCode, string(body))
+	}
+
+	return body, nil
 }
 
 // buildStartMeta gathers lightweight metadata about the block's runtime
