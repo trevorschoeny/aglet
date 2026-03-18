@@ -75,8 +75,10 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	// no execution happens yet.
 	startMeta := buildStartMeta(block, rootDomain)
 
-	// --- Step 3: Log block.start ---
-	logBlockStart(block, version, startMeta)
+	// --- Step 3: Log block.start (if observe contract allows it) ---
+	if shouldLog(block, "start") {
+		logBlockStart(block, version, startMeta)
+	}
 	startTime := time.Now()
 
 	// --- Step 3.5: Pre-warm downstream blocks ---
@@ -126,9 +128,11 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 		logMeta[k] = v
 	}
 
-	// --- Step 8: Log completion or error ---
+	// --- Step 8: Log completion or error (if observe contract allows it) ---
 	if result.Error != nil {
-		logBlockError(block, result.Error.Error(), logMeta)
+		if shouldLog(block, "error") {
+			logBlockError(block, result.Error.Error(), logMeta)
+		}
 
 		// Log the failed contract call to the surface's logs.jsonl
 		if opts.SurfaceContext != nil {
@@ -138,7 +142,9 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 		return nil, result.Error
 	}
 
-	logBlockComplete(block, durationMs, len(result.Output), result.Meta)
+	if shouldLog(block, "complete") {
+		logBlockComplete(block, durationMs, len(result.Output), result.Meta)
+	}
 
 	// --- Step 8.5: Log contract call to surface ---
 	// If this block was called via a surface contract endpoint, write a
@@ -343,6 +349,20 @@ func callRemoteBlock(peerURL, blockName string, input []byte) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+// shouldLog checks whether the block's observe contract includes a given event.
+// If the block has no observe config, all events are logged (backwards-compatible).
+func shouldLog(block *DiscoveredBlock, event string) bool {
+	if block.Config.Observe == nil || len(block.Config.Observe.Events) == 0 {
+		return true // no observe config → log everything
+	}
+	for _, e := range block.Config.Observe.Events {
+		if e == event {
+			return true
+		}
+	}
+	return false
 }
 
 // buildStartMeta gathers lightweight metadata about the block's runtime

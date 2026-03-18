@@ -20,6 +20,7 @@ type BlockYaml struct {
 	Tools              []string          `yaml:"tools"`              // Blocks callable during reasoning
 	Execution          string            `yaml:"execution"`
 	Error              string            `yaml:"error"`
+	Observe            *ObserveConfig    `yaml:"observe,omitempty"`  // Observability contract: which events to log
 	BehavioralMemory   *BehavioralMemory `yaml:"behavioral_memory,omitempty"` // Written by aglet stats --write
 }
 
@@ -48,6 +49,14 @@ type DomainDefaults struct {
 	Execution string `yaml:"execution"`
 	Error     string `yaml:"error"`
 	Model     string `yaml:"model"`
+}
+
+// ObserveConfig declares the block's observability contract.
+// The wrapper reads this to decide which events to log. If not present,
+// all events are logged (backwards-compatible default).
+type ObserveConfig struct {
+	Log    string   `yaml:"log"`    // Path to log file (default: ./logs.jsonl)
+	Events []string `yaml:"events"` // Which events to log: start, complete, error, tool.call
 }
 
 // BehavioralMemory holds the AML-computed behavioral profile of a Block.
