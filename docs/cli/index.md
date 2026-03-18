@@ -81,9 +81,9 @@ Execute a pipeline by following `calls` edges in `block.yaml`. Each Block's stdo
 aglet pipe <StartBlock> [EndBlock]
 ```
 
-**One argument:** follows `calls` edges linearly from the start Block to the terminal Block (one with no `calls`). Fails if the graph branches -- pipelines must be linear.
+**One argument:** triggers the start Block with calls auto-forwarding enabled. The wrapper propagates output through the `calls` chain automatically — each block's wrapper forwards to the next. The pipeline resolves itself from the declared edges. Fails if the graph branches -- pipelines must be linear.
 
-**Two arguments:** finds the shortest path (BFS) between the start and end Blocks in the calls graph.
+**Two arguments:** finds the shortest path (BFS) between the start and end Blocks in the calls graph, then runs each block sequentially with auto-forwarding disabled (to prevent double-execution).
 
 Input is read the same way as `aglet run` (file, stdin, or empty JSON). If the last argument ends in `.json`, it is treated as an input file.
 
@@ -105,34 +105,75 @@ echo '{"url": "https://example.com"}' | aglet pipe FetchPage
 
 ---
 
-## aglet serve
+## aglet listen
 
-Start an HTTP dev server from a Surface's contract. Each contract dependency becomes a `POST /contract/<DependencyName>` endpoint. Blocks are also accessible directly at `POST /block/<BlockName>`.
+Start a per-domain listener. The listener is an HTTP server scoped to a single domain -- it discovers all blocks within the domain and exposes them as `POST /block/{BlockName}` endpoints.
 
 ```
-aglet serve [--port PORT]
+aglet listen [--port PORT]
 ```
 
-Default port is `3001`. CORS headers are included for local development (`Access-Control-Allow-Origin: *`).
+Default port is `3001`. CORS headers are included for development. The listener finds the nearest `domain.yaml` by walking up from the current directory.
 
-If no `surface.yaml` is found, the server runs in direct mode -- all Blocks are exposed at `/block/{name}` without contract routing.
+The domain listener is the same in dev and prod. In dev, you run it locally. In prod, you deploy it. Same binary, same behavior, same observability. This is what makes dev/prod parity possible.
 
-Contract dependencies can map to a single Block (`block` field) or a pipeline (`pipeline` field that follows `calls` edges from the named Block).
+### Domain Configuration
+
+Domains opt in to being a listener with `listen: true` in `domain.yaml`. Cross-domain routing is configured via the `peers` table:
+
+```yaml
+# domain.yaml
+name: intelligence
+listen: true
+
+peers:
+  payments: "https://payments.myapp.com"
+  auth: "http://localhost:8081"
+```
+
+When a block's `calls` reference a domain-qualified name like `payments/PaymentAuth`, the listener forwards the request to the peer domain's `/block/PaymentAuth` endpoint.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/block/{BlockName}` | POST | Execute a block by name |
+| `/health` | GET | Health check (returns domain name) |
+
+### Headers
+
+| Header | Description |
+|---|---|
+| `X-Aglet-Caller` | Component name that initiated the call (for surface observability) |
+| `X-Aglet-Surface` | Surface name that contains the calling component |
 
 ### Examples
 
 ```bash
-# Start on default port 3001
-aglet serve
+# Start a domain listener
+cd my-project/intelligence/
+aglet listen --port 8080
 
-# Start on a custom port
-aglet serve --port 8080
-
-# Then call an endpoint
-curl -X POST http://localhost:3001/contract/Analyze \
+# Call a block
+curl -X POST http://localhost:8080/block/EmailClassifier \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello world"}'
+
+# With surface context headers
+curl -X POST http://localhost:8080/block/EmailClassifier \
+  -H "Content-Type: application/json" \
+  -H "X-Aglet-Caller: InboxPanel" \
+  -H "X-Aglet-Surface: Dashboard" \
+  -d '{"text": "Hello world"}'
 ```
+
+---
+
+## aglet serve (deprecated)
+
+`aglet serve` is deprecated. Use `aglet listen` instead, which provides per-domain listening with dev/prod parity.
+
+`aglet serve` still works and prints a deprecation warning. It operates at the project level and parses `surface.yaml` contracts, which is legacy behavior from before the domain listener architecture.
 
 ---
 

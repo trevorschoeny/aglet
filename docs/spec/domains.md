@@ -93,6 +93,32 @@ defaults:
 
 All three cascade through the domain hierarchy and can be overridden at any level.
 
+### Listener
+
+```yaml
+listen: true
+```
+
+Opt-in. When set, this domain can be deployed as a domain listener -- a lightweight HTTP server that accepts requests and routes them to block wrappers within the domain. The listener is the domain's membrane: the way signals enter and leave.
+
+In dev and prod, the listener behaves identically. Same binary (`aglet listen`), same routing, same observability. This is what makes dev/prod parity possible.
+
+Domains without `listen: true` can still contain blocks that are executed via `aglet run` or called as tools by other blocks. The `listen` flag only controls whether the domain exposes an HTTP interface.
+
+### Peers
+
+```yaml
+peers:
+  payments: "https://payments.myapp.com"
+  auth: "http://localhost:8081"
+```
+
+Cross-domain routing table. Maps domain names to the URLs of their listeners. When a block's `calls` reference a domain-qualified name (e.g., `payments/PaymentAuth`), the wrapper extracts the domain prefix, looks it up in `peers`, and forwards the request to that URL.
+
+Peers are explicit and declared -- no service discovery, no magic. The routing topology is visible in the YAML.
+
+In dev, peers point to localhost ports. In prod, they point to deployed URLs. The block code never changes.
+
 ## The Root Domain
 
 The root domain is the project itself. Its `domain.yaml` defines project-wide settings, and its `intent.md` is the founding document that every Block, Surface, and domain exists in service of.
@@ -129,6 +155,12 @@ defaults:
   execution: sync
   error: propagate
   model: claude-sonnet-4-20250514
+
+listen: true
+
+# peers:
+#   payments: "https://payments.myapp.com"
+#   auth: "http://localhost:8081"
 ```
 
 ### Sub-domain Example
