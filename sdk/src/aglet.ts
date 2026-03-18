@@ -7,13 +7,23 @@ const DEFAULT_FLUSH_INTERVAL = 300;
 // The listener appends these to the surface's logs.jsonl.
 const EVENTS_ENDPOINT = "/_aglet/events";
 
+// --- Global auto-tracking state ---
+// Auto-tracking attaches global DOM listeners once (on first createAglet call)
+// and shares the event buffer across all instances. This avoids duplicate
+// listeners when multiple components each create their own aglet instance.
+let globalBuffer: InteractionEvent[] = [];
+let globalSurface = "";
+let globalBaseUrl = "";
+let globalFlushTimer: ReturnType<typeof setInterval> | null = null;
+let globalListenersAttached = false;
+let instanceCount = 0;
+
 /**
  * Reads SDK config injected by the domain listener into the HTML.
  * The listener reads surface.yaml and injects:
  *   <script>window.__AGLET__ = {surface: "Dashboard", flushInterval: 300, ...}</script>
  *
- * Returns the config object, or an empty object if not found (e.g., no
- * listener proxying, or running in a test environment).
+ * Returns the config object, or an empty object if not found.
  */
 function getInjectedConfig(): Partial<AgletOptions> {
   if (typeof window === "undefined") return {};
@@ -25,23 +35,214 @@ function getInjectedConfig(): Partial<AgletOptions> {
 }
 
 /**
+ * Push an event into the global buffer.
+ */
+function pushEvent(
+  action: string,
+  caller: string,
+  detail?: Record<string, unknown>,
+): void {
+  globalBuffer.push({
+    event: "interaction",
+    timestamp: new Date().toISOString(),
+    caller,
+    surface: globalSurface,
+    action,
+    detail,
+  });
+}
+
+/**
+ * Flush all buffered events to the domain listener.
+ * Uses sendBeacon (reliable during page unload) with fetch fallback.
+ */
+function globalFlush(): void {
+  if (globalBuffer.length === 0) return;
+
+  const batch = globalBuffer;
+  globalBuffer = [];
+
+  const payload = JSON.stringify(batch);
+  const url = globalBaseUrl + EVENTS_ENDPOINT;
+
+  if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+    navigator.sendBeacon(url, payload);
+  } else if (typeof fetch !== "undefined") {
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    }).catch(() => {
+      // Silent failure — observability should never break the app
+    });
+  }
+}
+
+/**
+ * Truncate text to a max length for log readability.
+ */
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "…";
+}
+
+/**
+ * Extract a human-readable label from a clicked element.
+ * Tries: aria-label, textContent, id, tag+class.
+ */
+function describeElement(el: Element): Record<string, string> {
+  const info: Record<string, string> = { tag: el.tagName.toLowerCase() };
+
+  if (el.id) info.id = el.id;
+
+  const ariaLabel = el.getAttribute("aria-label");
+  if (ariaLabel) {
+    info.label = truncate(ariaLabel, 80);
+  } else if (el.textContent) {
+    const text = el.textContent.trim();
+    if (text && text.length < 120) {
+      info.text = truncate(text, 80);
+    }
+  }
+
+  // Check for data-aglet-component attribute for component attribution
+  const agletComponent = el.closest("[data-aglet]");
+  if (agletComponent) {
+    info.component = agletComponent.getAttribute("data-aglet") ?? "";
+  }
+
+  return info;
+}
+
+/**
+ * Attach global DOM listeners for auto-tracking.
+ * Called once on first createAglet instance. Captures:
+ * - Clicks on interactive elements (buttons, links, inputs)
+ * - Form submissions
+ * - Navigation (popstate, i.e., back/forward)
+ */
+function attachGlobalListeners(): void {
+  if (globalListenersAttached) return;
+  if (typeof document === "undefined") return;
+  globalListenersAttached = true;
+
+  // --- Click tracking ---
+  // Captures clicks on interactive elements: buttons, links, inputs,
+  // and anything with role="button". Ignores passive elements (divs, spans)
+  // to reduce noise.
+  document.addEventListener(
+    "click",
+    (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target) return;
+
+      // Walk up to find the nearest interactive element
+      const interactive = target.closest(
+        "a, button, input, select, textarea, [role='button'], [onclick]",
+      );
+      if (!interactive) return;
+
+      const detail = describeElement(interactive);
+
+      // For links, include the href
+      if (interactive.tagName === "A") {
+        const href = interactive.getAttribute("href");
+        if (href) detail.href = href;
+      }
+
+      pushEvent("click", detail.component ?? "", detail);
+    },
+    { capture: true, passive: true },
+  );
+
+  // --- Form submission tracking ---
+  document.addEventListener(
+    "submit",
+    (e: Event) => {
+      const form = e.target as HTMLFormElement | null;
+      if (!form) return;
+
+      const detail: Record<string, string> = { tag: "form" };
+      if (form.id) detail.id = form.id;
+      if (form.action) detail.action_url = form.action;
+      if (form.method) detail.method = form.method;
+
+      const agletComponent = form.closest("[data-aglet]");
+      const caller = agletComponent?.getAttribute("data-aglet") ?? "";
+
+      pushEvent("form_submit", caller, detail);
+    },
+    { capture: true, passive: true },
+  );
+
+  // --- Navigation tracking (back/forward) ---
+  window.addEventListener("popstate", () => {
+    pushEvent("navigate", "", {
+      url: window.location.pathname,
+      type: "popstate",
+    });
+  });
+
+  // --- Page visibility tracking (tab switch / minimize) ---
+  document.addEventListener("visibilitychange", () => {
+    pushEvent("visibility", "", {
+      state: document.visibilityState,
+    });
+  });
+
+  // --- Flush on page unload ---
+  window.addEventListener("beforeunload", globalFlush);
+}
+
+/**
+ * Start the global flush timer if not already running.
+ */
+function startGlobalFlushTimer(intervalSec: number): void {
+  if (globalFlushTimer !== null) return;
+  if (typeof setInterval === "undefined") return;
+  if (intervalSec <= 0) return;
+  globalFlushTimer = setInterval(globalFlush, intervalSec * 1000);
+}
+
+/**
+ * Stop global auto-tracking and clean up when no instances remain.
+ */
+function stopGlobalTracking(): void {
+  if (instanceCount > 0) return;
+
+  if (globalFlushTimer !== null) {
+    clearInterval(globalFlushTimer);
+    globalFlushTimer = null;
+  }
+
+  // Note: we don't remove the DOM listeners — they're passive and harmless.
+  // Removing them would require storing references, adding complexity for
+  // a case (all instances destroyed) that rarely happens in practice.
+}
+
+/**
  * createAglet creates an SDK instance bound to a specific component.
  *
  * Each component in a Surface should create its own instance so that
- * contract calls and interaction events carry the correct caller identity.
+ * contract calls carry the correct caller identity. Interaction events
+ * are tracked automatically at the page level (clicks, form submissions,
+ * navigation) — no manual track() calls needed for basic observability.
+ *
+ * For component-level attribution of auto-tracked events, add
+ * data-aglet="ComponentName" to the component's root DOM element.
  *
  * Usage:
  *   const aglet = createAglet('FeedbackPanel')
  *   const result = await aglet.call('Sentiment', { text: 'hello' })
- *   aglet.track('button_click', { action: 'submit' })
+ *   // Clicks, form submissions, navigation are tracked automatically
+ *   // Use track() for custom events specific to your component:
+ *   aglet.track('custom_action', { some: 'detail' })
  */
 export function createAglet(
   component: string,
   options: AgletOptions = {},
 ): AgletInstance {
   // Merge config: explicit options > injected from surface.yaml > defaults.
-  // The domain listener injects surface.yaml config into the HTML via
-  // window.__AGLET__. Explicit options always win.
   const injected = getInjectedConfig();
   const surface = options.surface ?? injected.surface ?? "";
   const baseUrl = options.baseUrl ?? injected.baseUrl ?? "";
@@ -50,50 +251,20 @@ export function createAglet(
   const trackEnabled =
     options.trackInteractions ?? injected.trackInteractions ?? true;
 
-  // --- Event buffer ---
-  // Interaction events accumulate here and are flushed periodically.
-  let buffer: InteractionEvent[] = [];
-
-  // --- Flush logic ---
-  // Sends all buffered events to the domain listener via sendBeacon
-  // (reliable even during page unload) or falls back to fetch.
-  function flush(): void {
-    if (buffer.length === 0) return;
-
-    // Drain the buffer atomically
-    const batch = buffer;
-    buffer = [];
-
-    const payload = JSON.stringify(batch);
-
-    // Prefer sendBeacon — it's fire-and-forget and works during beforeunload.
-    // Falls back to fetch for environments without sendBeacon (e.g., Node/SSR).
-    const url = baseUrl + EVENTS_ENDPOINT;
-    if (typeof navigator !== "undefined" && navigator.sendBeacon) {
-      navigator.sendBeacon(url, payload);
-    } else if (typeof fetch !== "undefined") {
-      // Best-effort — don't await, don't throw on failure
-      fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      }).catch(() => {
-        // Silent failure — observability should never break the app
-      });
-    }
-    // If neither sendBeacon nor fetch exist, events are silently dropped.
-    // This is intentional — the SDK should never crash the host application.
+  // Set global state from first instance
+  if (instanceCount === 0) {
+    globalSurface = surface;
+    globalBaseUrl = baseUrl;
   }
+  instanceCount++;
 
-  // --- Periodic flush timer ---
-  let flushTimer: ReturnType<typeof setInterval> | null = null;
-  if (typeof setInterval !== "undefined" && flushIntervalSec > 0) {
-    flushTimer = setInterval(flush, flushIntervalSec * 1000);
-  }
-
-  // --- Flush on page unload ---
-  if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", flush);
+  // --- Auto-tracking setup ---
+  // Attach global DOM listeners (once) and start the flush timer.
+  // Also log a component_mount event for this specific component.
+  if (trackEnabled && typeof window !== "undefined") {
+    attachGlobalListeners();
+    startGlobalFlushTimer(flushIntervalSec);
+    pushEvent("component_mount", component, {});
   }
 
   // --- Public API ---
@@ -106,10 +277,6 @@ export function createAglet(
       contract: string,
       input: TInput,
     ): Promise<TOutput> {
-      // POST to the contract endpoint with the caller header.
-      // The domain listener routes this to the block wrapper, which
-      // handles all server-side logging (block.start, block.complete,
-      // contract.call to surface logs).
       const url = baseUrl + "/contract/" + contract;
 
       const response = await fetch(url, {
@@ -134,33 +301,23 @@ export function createAglet(
 
     track(action: string, detail?: Record<string, unknown>): void {
       if (!trackEnabled) return;
-
-      buffer.push({
-        event: "interaction",
-        timestamp: new Date().toISOString(),
-        caller: component,
-        surface,
-        action,
-        detail,
-      });
+      pushEvent(action, component, detail);
     },
 
-    flush,
+    flush: globalFlush,
 
     destroy(): void {
-      // Flush any remaining events
-      flush();
-
-      // Stop the periodic timer
-      if (flushTimer !== null) {
-        clearInterval(flushTimer);
-        flushTimer = null;
+      // Log component unmount
+      if (trackEnabled) {
+        pushEvent("component_unmount", component, {});
       }
 
-      // Remove the beforeunload listener
-      if (typeof window !== "undefined") {
-        window.removeEventListener("beforeunload", flush);
-      }
+      // Flush remaining events
+      globalFlush();
+
+      // Decrement instance count and clean up if last instance
+      instanceCount = Math.max(0, instanceCount - 1);
+      stopGlobalTracking();
     },
   };
 }
