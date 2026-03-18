@@ -34,9 +34,26 @@ type WrapBlockOptions struct {
 	// Set to false when running blocks in an explicit pipeline (aglet pipe
 	// with an EndBlock) to prevent double-execution of downstream blocks.
 	ForwardCalls bool
+
+	// SurfaceContext holds information about the surface and component that
+	// initiated this block execution via a contract call. When present, the
+	// wrapper writes a contract.call entry to the surface's logs.jsonl.
+	// This is how the wrapper (the block's network-facing layer) communicates
+	// back to the surface — it's part of the wrapper's role to interact with
+	// other units in the network.
+	SurfaceContext *SurfaceCallContext
 }
 
-// DefaultWrapOptions returns the standard wrapper options: forwarding enabled.
+// SurfaceCallContext carries information about a surface contract call.
+// Populated from X-Aglet-Surface and X-Aglet-Caller HTTP headers.
+type SurfaceCallContext struct {
+	SurfaceDir  string // Absolute path to the surface directory (for writing logs)
+	SurfaceName string // Surface name (from surface.yaml)
+	Caller      string // Component name that initiated the call (from X-Aglet-Caller header)
+	Contract    string // Contract dependency name (e.g., "Sentiment")
+}
+
+// DefaultWrapOptions returns the standard wrapper options: forwarding enabled, no surface context.
 func DefaultWrapOptions() WrapBlockOptions {
 	return WrapBlockOptions{ForwardCalls: true}
 }
@@ -112,10 +129,25 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	// --- Step 8: Log completion or error ---
 	if result.Error != nil {
 		logBlockError(block, result.Error.Error(), logMeta)
+
+		// Log the failed contract call to the surface's logs.jsonl
+		if opts.SurfaceContext != nil {
+			logContractCall(opts.SurfaceContext, block.Config.Name, durationMs, false, result.Error.Error())
+		}
+
 		return nil, result.Error
 	}
 
 	logBlockComplete(block, durationMs, len(result.Output), result.Meta)
+
+	// --- Step 8.5: Log contract call to surface ---
+	// If this block was called via a surface contract endpoint, write a
+	// contract.call entry to the surface's logs.jsonl. The wrapper is the
+	// block's network-facing layer — writing to the surface log is part
+	// of its role as a participant in the network.
+	if opts.SurfaceContext != nil {
+		logContractCall(opts.SurfaceContext, block.Config.Name, durationMs, true, "")
+	}
 
 	// --- Step 9: Update behavioral memory (best-effort) ---
 	// After a successful run, recompute and write behavioral_memory to

@@ -22,11 +22,17 @@ func StartDevServer(projectRoot string, rootDomain *DomainYaml, port int) error 
 		return startDirectServer(projectRoot, rootDomain, port)
 	}
 
-	// Parse the surface contract
+	// Parse the surface contract and resolve surface metadata
 	deps, err := parseSurfaceContract(surfacePath)
 	if err != nil {
 		return fmt.Errorf("failed to parse surface contract: %w", err)
 	}
+
+	// Resolve the surface directory and name for contract call logging.
+	// The wrapper uses this context to write contract.call entries to the
+	// surface's logs.jsonl whenever a contract endpoint is called.
+	surfaceDir := filepath.Dir(surfacePath)
+	surfaceName := parseSurfaceName(surfacePath)
 
 	fmt.Fprintf(os.Stderr, "[aglet serve] Parsed contract from: %s\n", surfacePath)
 
@@ -54,8 +60,9 @@ func StartDevServer(projectRoot string, rootDomain *DomainYaml, port int) error 
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "  POST /contract/%s → Block '%s'\n", depName, dep.Block)
+			contractName := depName // capture for closure
 			mux.HandleFunc("/contract/"+depName, func(w http.ResponseWriter, r *http.Request) {
-				handleBlockRequest(w, r, dep.Block, projectRoot, rootDomain)
+				handleContractBlockRequest(w, r, dep.Block, projectRoot, rootDomain, surfaceDir, surfaceName, contractName)
 			})
 
 		} else if dep.Pipeline != "" {
@@ -75,8 +82,9 @@ func StartDevServer(projectRoot string, rootDomain *DomainYaml, port int) error 
 			_, err := FindBlock(projectRoot, depName)
 			if err == nil {
 				fmt.Fprintf(os.Stderr, "  POST /contract/%s → Block '%s'\n", depName, depName)
+				contractName := depName // capture for closure
 				mux.HandleFunc("/contract/"+depName, func(w http.ResponseWriter, r *http.Request) {
-					handleBlockRequest(w, r, depName, projectRoot, rootDomain)
+					handleContractBlockRequest(w, r, depName, projectRoot, rootDomain, surfaceDir, surfaceName, contractName)
 				})
 			} else {
 				fmt.Fprintf(os.Stderr, "  POST /contract/%s → (no matching Block)\n", depName)
@@ -132,7 +140,50 @@ func startDirectServer(projectRoot string, rootDomain *DomainYaml, port int) err
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), handler)
 }
 
+// handleContractBlockRequest executes a single Block via a surface contract endpoint.
+// It extracts surface context from headers (X-Aglet-Caller) and passes it through
+// to the block wrapper, which writes a contract.call entry to the surface's logs.jsonl.
+func handleContractBlockRequest(w http.ResponseWriter, r *http.Request, blockName string, projectRoot string, rootDomain *DomainYaml, surfaceDir string, surfaceName string, contractName string) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	input := readHTTPInput(r)
+
+	block, err := FindBlock(projectRoot, blockName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Block not found: %s"}`, err), http.StatusNotFound)
+		return
+	}
+
+	// Build surface context from HTTP headers and server state.
+	// The wrapper uses this to write contract.call entries to the surface's logs.
+	caller := r.Header.Get("X-Aglet-Caller")
+	surfaceCtx := &SurfaceCallContext{
+		SurfaceDir:  surfaceDir,
+		SurfaceName: surfaceName,
+		Caller:      caller,
+		Contract:    contractName,
+	}
+
+	opts := WrapBlockOptions{
+		ForwardCalls:   true,
+		SurfaceContext: surfaceCtx,
+	}
+
+	output, err := WrapBlockWithOptions(block, rootDomain, projectRoot, input, opts)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Block execution failed: %s"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(output)
+}
+
 // handleBlockRequest executes a single Block and returns its output as HTTP response.
+// Used for direct /block/{name} access — no surface context.
 func handleBlockRequest(w http.ResponseWriter, r *http.Request, blockName string, projectRoot string, rootDomain *DomainYaml) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -226,12 +277,27 @@ func parseSurfaceContract(path string) (map[string]ContractDependency, error) {
 	return surface.Contract.Dependencies, nil
 }
 
+// parseSurfaceName reads the surface name from a surface.yaml file.
+// Falls back to the directory name if the name field isn't set.
+func parseSurfaceName(surfacePath string) string {
+	data, err := os.ReadFile(surfacePath)
+	if err != nil {
+		return filepath.Base(filepath.Dir(surfacePath))
+	}
+	var surface SurfaceYaml
+	if err := yaml.Unmarshal(data, &surface); err != nil || surface.Name == "" {
+		return filepath.Base(filepath.Dir(surfacePath))
+	}
+	return surface.Name
+}
+
 // corsMiddleware adds CORS headers for local development.
+// Allows X-Aglet-Caller and X-Aglet-Surface headers for surface contract observability.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Aglet-Caller, X-Aglet-Surface")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)

@@ -256,6 +256,52 @@ func logApplicationStderr(block *DiscoveredBlock, stderr string) {
 	appendLog(block, entry)
 }
 
+// logContractCall writes a contract.call event to a surface's logs.jsonl.
+// This is called by the block wrapper when it detects surface context in
+// the request — the wrapper is the block's network-facing layer, so writing
+// to the surface's log is a natural part of its role.
+func logContractCall(ctx *SurfaceCallContext, blockName string, durationMs int64, success bool, errMsg string) {
+	if ctx == nil || ctx.SurfaceDir == "" {
+		return
+	}
+
+	status := "success"
+	if !success {
+		status = "error"
+	}
+
+	entry := LogEntry{
+		"event":       "contract.call",
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"status":      status,
+		"source":      "aglet",
+		"surface":     ctx.SurfaceName,
+		"contract":    ctx.Contract,
+		"block":       blockName,
+		"caller":      ctx.Caller,
+		"duration_ms": durationMs,
+	}
+	if errMsg != "" {
+		entry["error"] = errMsg
+	}
+
+	// Write to the surface's logs.jsonl (not the block's)
+	logPath := filepath.Join(ctx.SurfaceDir, "logs.jsonl")
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[aglet] warning: could not write surface log to %s: %v\n", logPath, err)
+		return
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	f.Write(data)
+	f.WriteString("\n")
+}
+
 // appendLog writes a JSON log entry to the Block's logs.jsonl.
 func appendLog(block *DiscoveredBlock, entry LogEntry) {
 	logPath := filepath.Join(block.Dir, "logs.jsonl")
