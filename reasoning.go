@@ -14,36 +14,44 @@ import (
 
 const maxToolLoops = 20
 
-// RunReasoningBlock executes a reasoning Block (runtime: reasoning).
+// ExecuteReasoningBlock is the pure executor for reasoning Blocks (runtime: reasoning).
 // It reads prompt.md, constructs an LLM API call, handles tool-use loops,
 // and returns the structured output.
-func RunReasoningBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte) ([]byte, error) {
-	// Check for prompt changes and log if updated
-	version := checkAndLogUpdate(block)
-
+//
+// Outer-level logging (block.start, block.complete, block.error) is NOT done here —
+// that's the wrapper's job. However, tool-level logging (logToolCall, logToolResult)
+// IS done here because these are execution-level events that happen mid-reasoning,
+// inside the tool-use loop.
+func ExecuteReasoningBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte) *ExecutionResult {
 	// Resolve model
 	model, err := ResolveModel(block, rootDomain)
 	if err != nil {
-		return nil, err
+		return &ExecutionResult{Error: err, Meta: map[string]interface{}{}}
 	}
 
 	// Resolve provider
 	provider, err := ResolveProvider(model, block.Config.Provider, rootDomain.Providers)
 	if err != nil {
-		return nil, err
+		return &ExecutionResult{Error: err, Meta: map[string]interface{}{"model": model}}
 	}
 
 	// Read prompt.md
 	promptPath := filepath.Join(block.Dir, strings.TrimPrefix(block.Config.Prompt, "./"))
 	prompt, err := os.ReadFile(promptPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read prompt.md for Block '%s': %w", block.Config.Name, err)
+		return &ExecutionResult{
+			Error: fmt.Errorf("failed to read prompt.md for Block '%s': %w", block.Config.Name, err),
+			Meta:  map[string]interface{}{"model": model, "provider": provider.Name},
+		}
 	}
 
 	// Read output schema from block.yaml (already parsed from YAML)
 	outSchemaObj := block.Config.Schema.Out
 	if outSchemaObj == nil {
-		return nil, fmt.Errorf("no output schema defined in block.yaml for Block '%s'", block.Config.Name)
+		return &ExecutionResult{
+			Error: fmt.Errorf("no output schema defined in block.yaml for Block '%s'", block.Config.Name),
+			Meta:  map[string]interface{}{"model": model, "provider": provider.Name},
+		}
 	}
 
 	// Resolve tool Blocks (if any)
@@ -52,22 +60,20 @@ func RunReasoningBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRo
 	for _, toolName := range block.Config.Tools {
 		toolBlock, err := FindBlock(projectRoot, toolName)
 		if err != nil {
-			return nil, fmt.Errorf("tool Block '%s' referenced by '%s': %w", toolName, block.Config.Name, err)
+			return &ExecutionResult{
+				Error: fmt.Errorf("tool Block '%s' referenced by '%s': %w", toolName, block.Config.Name, err),
+				Meta:  map[string]interface{}{"model": model, "provider": provider.Name},
+			}
 		}
 		if toolBlock.Config.Runtime == "embedded" {
-			return nil, fmt.Errorf("tool Block '%s' has runtime 'embedded' — only process and reasoning Blocks can be tools", toolName)
+			return &ExecutionResult{
+				Error: fmt.Errorf("tool Block '%s' has runtime 'embedded' — only process and reasoning Blocks can be tools", toolName),
+				Meta:  map[string]interface{}{"model": model, "provider": provider.Name},
+			}
 		}
 		toolBlocks = append(toolBlocks, toolBlock)
 		toolNames = append(toolNames, toolName)
 	}
-
-	// Log block start with reasoning-specific metadata
-	logBlockStart(block, version, LogEntry{
-		"model":    model,
-		"provider": provider.Name,
-		"tools":    toolNames,
-	})
-	startTime := time.Now()
 
 	// Dispatch to the correct provider format
 	var output []byte
@@ -79,32 +85,27 @@ func RunReasoningBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRo
 	case "openai":
 		output, err = runOpenAIReasoning(block, provider, model, string(prompt), input, outSchemaObj, toolBlocks, rootDomain, projectRoot)
 	default:
-		return nil, fmt.Errorf("unknown provider format '%s' for provider '%s'", provider.Format, provider.Name)
+		err = fmt.Errorf("unknown provider format '%s' for provider '%s'", provider.Format, provider.Name)
 	}
 
-	durationMs := time.Since(startTime).Milliseconds()
-
-	if err != nil {
-		logBlockError(block, err.Error(), LogEntry{
-			"duration_ms":  durationMs,
-			"model":        model,
-			"provider":     provider.Name,
-			"input_tokens": totalInputTokens,
-			"output_tokens": totalOutputTokens,
-		})
-		return nil, err
-	}
-
-	// Log successful completion with token usage
-	logBlockComplete(block, durationMs, len(output), LogEntry{
+	// Build metadata for the wrapper to include in log entries
+	meta := map[string]interface{}{
 		"model":         model,
 		"provider":      provider.Name,
 		"input_tokens":  totalInputTokens,
 		"output_tokens": totalOutputTokens,
 		"tool_loops":    toolLoops,
-	})
+	}
+	if len(toolNames) > 0 {
+		meta["tools"] = toolNames
+	}
 
-	return output, nil
+	return &ExecutionResult{
+		Output: output,
+		Stderr: "", // Reasoning blocks don't produce stderr (no subprocess)
+		Error:  err,
+		Meta:   meta,
+	}
 }
 
 // runAnthropicReasoning handles reasoning Blocks using the Anthropic API format.
@@ -194,7 +195,10 @@ func runAnthropicReasoning(block *DiscoveredBlock, provider *ResolvedProvider, m
 				return outputData, totalInputTokens, totalOutputTokens, i, nil
 			}
 
-			// This is a regular tool call — log it and execute the tool Block
+			// This is a regular tool call — log it and execute the tool Block.
+			// Tool-level logging stays here because it's part of the execution
+			// flow: the reasoning block is mid-thought, calling tools, continuing.
+			// The wrapper can't know about individual tool calls.
 			logToolCall(block, content.Name, i)
 			toolStart := time.Now()
 
@@ -363,7 +367,7 @@ func runOpenAIReasoning(block *DiscoveredBlock, provider *ResolvedProvider, mode
 		// Append assistant message with tool calls
 		messages = append(messages, choice.Message)
 
-		// Execute each tool call
+		// Execute each tool call — tool-level logging stays here
 		for _, tc := range choice.Message.ToolCalls {
 			logToolCall(block, tc.Function.Name, i)
 			toolStart := time.Now()
@@ -438,18 +442,14 @@ func callOpenAI(provider *ResolvedProvider, req OpenAIRequest) (*OpenAIResponse,
 }
 
 // executeToolBlock runs a tool Block (process or reasoning) and returns its output.
+// Tool blocks are executed through WrapBlock so they get full observability too.
 func executeToolBlock(name string, input []byte, rootDomain *DomainYaml, projectRoot string) ([]byte, error) {
 	toolBlock, err := FindBlock(projectRoot, name)
 	if err != nil {
 		return nil, err
 	}
 
-	switch toolBlock.Config.Runtime {
-	case "process", "":
-		return RunProcessBlock(toolBlock, rootDomain, bytes.NewReader(input))
-	case "reasoning":
-		return RunReasoningBlock(toolBlock, rootDomain, projectRoot, input)
-	default:
-		return nil, fmt.Errorf("tool Block '%s' has unsupported runtime '%s'", name, toolBlock.Config.Runtime)
-	}
+	// Execute through the wrapper so the tool block gets its own
+	// observability (logs, behavioral memory updates, etc.)
+	return WrapBlock(toolBlock, rootDomain, projectRoot, input)
 }

@@ -72,6 +72,17 @@ type DiscoveredBlock struct {
 	Dir    string // Absolute path to the Block directory
 }
 
+// ExecutionResult carries everything the executor produces back to the wrapper.
+// The wrapper uses this to write log entries with rich metadata.
+// Executors are pure: they execute the block, capture all output, and return
+// everything here. They never write to logs.jsonl — that's the wrapper's job.
+type ExecutionResult struct {
+	Output []byte                 // The block's JSON output (stdout for process, LLM response for reasoning)
+	Stderr string                 // ALL stderr captured from the implementation (process blocks only; empty for reasoning)
+	Error  error                  // nil on success
+	Meta   map[string]interface{} // Runtime-specific metadata (tokens, model, runner, tool_loops, etc.)
+}
+
 // SurfaceYaml represents the parsed surface.yaml.
 type SurfaceYaml struct {
 	ID          string                       `yaml:"id"`

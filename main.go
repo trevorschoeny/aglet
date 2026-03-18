@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -176,8 +175,8 @@ func handleReason() {
 	// Read input
 	input := readInput(inputFile)
 
-	// Execute reasoning
-	output, err := RunReasoningBlock(block, rootDomain, projectRoot, input)
+	// Execute through the wrapper for full observability
+	output, err := WrapBlock(block, rootDomain, projectRoot, input)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
@@ -251,36 +250,14 @@ func handleValidate() {
 	}
 }
 
-// dispatchBlock routes execution based on the Block's runtime.
-// On success, quietly updates behavioral_memory in block.yaml — the AML
-// observing passively, as the Canon intends. This is best-effort and never
-// fails the execution itself.
+// dispatchBlock routes execution through the block wrapper.
+// The wrapper handles observability (logging, stderr capture, behavioral memory)
+// and delegates to the appropriate executor (process, reasoning) based on runtime.
+//
+// This function is the universal entry point used by aglet run, aglet pipe,
+// and aglet serve. All execution goes through the wrapper.
 func dispatchBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte) ([]byte, error) {
-	var output []byte
-	var err error
-
-	switch block.Config.Runtime {
-	case "process", "":
-		output, err = RunProcessBlock(block, rootDomain, bytes.NewReader(input))
-	case "reasoning":
-		output, err = RunReasoningBlock(block, rootDomain, projectRoot, input)
-	case "embedded":
-		return nil, fmt.Errorf("Block '%s' has runtime 'embedded' — embedded Blocks are internal to Surfaces and cannot be executed externally", block.Config.Name)
-	default:
-		return nil, fmt.Errorf("Block '%s' has unknown runtime '%s'", block.Config.Name, block.Config.Runtime)
-	}
-
-	// After a successful top-level run, update behavioral_memory silently.
-	// Tool calls inside reasoning use executeToolBlock — not this path — so
-	// sub-invocations don't trigger spurious memory updates.
-	// Pass nil for allBlocks: the observed_callers cross-scan is skipped here
-	// because scanning every block's logs on every run would be too expensive.
-	// It runs during explicit `aglet stats` calls instead.
-	if err == nil {
-		_ = writeBehavioralMemory(block, computeBehavioralMemory(block, nil))
-	}
-
-	return output, err
+	return WrapBlock(block, rootDomain, projectRoot, input)
 }
 
 // readInput reads Block input from a file, stdin, or defaults to empty JSON.
