@@ -71,6 +71,9 @@ dev:
   command: "npm run dev"
   port: 5173
 
+sdk:
+  flush_interval: 300
+
 contract:
   GetEmailsByCategory:
     block: FetchEmails
@@ -237,6 +240,90 @@ The `consumes` field creates bidirectional traceability with the Surface's contr
 "Would this logic be useful outside this Component?" If yes, extract it into an embedded Block with typed schemas and an intent doc. If no -- if it's genuinely about managing this specific piece of UI state -- it's Component logic.
 
 Trivial one-liner derivations (like computing a count from a filtered list) can stay in Components. The threshold for extraction is whether the logic has enough complexity or reusability to warrant an intent doc.
+
+## Observability
+
+Surfaces have their own `logs.jsonl` in the surface directory. This file captures two kinds of events:
+
+**Contract call events** — written by block wrappers. When a component calls a block through a contract endpoint, the block wrapper writes a `contract.call` entry to the surface's log with the component name, duration, and success/error. This is automatic — it happens server-side whenever the request includes the right headers.
+
+**Client-side events** — written by the `@aglet/sdk`. Mount/unmount lifecycle and custom tracking events. These are buffered in the browser and flushed every 5 minutes + on page unload.
+
+### The SDK
+
+The `@aglet/sdk` package provides per-component instances with three capabilities:
+
+1. **Lifecycle** — `mount()` and `unmount()` log when a component appears and disappears
+2. **Contract calls** — `call()` makes a contract request with automatic `X-Aglet-Caller` and `X-Aglet-Surface` headers
+3. **Custom tracking** — `track()` logs any component-specific event
+
+```typescript
+import { createAglet } from '@aglet/sdk'
+
+const aglet = createAglet('FeedbackPanel')
+
+aglet.mount()                                          // lifecycle event
+const result = await aglet.call('Sentiment', { text }) // contract call
+aglet.track('analysis_complete', { confidence: 0.95 }) // custom event
+aglet.unmount()                                        // lifecycle event
+aglet.destroy()                                        // flush + cleanup
+```
+
+In React:
+
+```typescript
+function FeedbackPanel() {
+  useEffect(() => {
+    const aglet = createAglet('FeedbackPanel')
+    aglet.mount()
+    return () => {
+      aglet.unmount()
+      aglet.destroy()
+    }
+  }, [])
+}
+```
+
+All instances share a single event buffer and flush timer. The SDK has no DOM interaction — mount and unmount are explicit calls in your component code. `aglet new component` scaffolds the lifecycle boilerplate automatically.
+
+### How Contract Calls Are Tracked
+
+When a component calls `aglet.call('Sentiment', { text })`, the SDK sends `POST /contract/Sentiment` with two headers:
+
+```
+X-Aglet-Caller: FeedbackPanel
+X-Aglet-Surface: Dashboard
+```
+
+The domain listener routes the request to the block wrapper. The wrapper executes the block, logs to the block's own `logs.jsonl`, and writes a `contract.call` entry to the surface's `logs.jsonl`:
+
+```jsonl
+{"event":"contract.call","contract":"Sentiment","block":"SentimentAnalyzer","caller":"FeedbackPanel","surface":"Dashboard","duration_ms":42,"success":true,"ts":"2026-03-17T21:09:00Z"}
+```
+
+A component using a raw `fetch()` instead of `aglet.call()` still works — the block executes normally — but the surface log won't have the component attribution. The headers are what make the observability work.
+
+### SDK Configuration
+
+The SDK reads from `window.__AGLET__`, which the domain listener injects into the HTML from the `sdk` section of `surface.yaml`:
+
+```yaml
+# surface.yaml
+sdk:
+  flush_interval: 300    # seconds, default 300 (5 min)
+```
+
+Developers can also pass config explicitly to `createAglet()` — explicit options override injected config, which overrides defaults.
+
+### Client-Side Event Flushing
+
+Events from `mount()`, `unmount()`, and `track()` are buffered in memory and flushed to `POST /_aglet/events` on the domain listener. The listener appends them to the surface's `logs.jsonl`.
+
+Flushing happens on two triggers:
+- **Periodic** — every `flush_interval` seconds (default 5 minutes)
+- **Page unload** — via `sendBeacon`, which is reliable even when the tab is closing
+
+If the endpoint isn't available (production without an event receiver), the flush silently fails. Observability never breaks the app.
 
 ## The Logic Division
 
