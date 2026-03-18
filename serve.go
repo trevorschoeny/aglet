@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,12 +103,19 @@ func StartDevServer(projectRoot string, rootDomain *DomainYaml, port int) error 
 		handleBlockRequest(w, r, blockName, projectRoot, rootDomain)
 	})
 
+	// SDK interaction events endpoint — receives batched client-side events
+	// from the @aglet/sdk and appends them to the surface's logs.jsonl.
+	mux.HandleFunc("/_aglet/events", func(w http.ResponseWriter, r *http.Request) {
+		handleInteractionEvents(w, r, surfaceDir)
+	})
+
 	// CORS middleware for local development
 	handler := corsMiddleware(mux)
 
 	fmt.Fprintf(os.Stderr, "\n[aglet serve] Dev server running on http://localhost:%d\n", port)
 	fmt.Fprintf(os.Stderr, "  Contract endpoints: /contract/{DependencyName}\n")
 	fmt.Fprintf(os.Stderr, "  Direct access:      /block/{BlockName}\n")
+	fmt.Fprintf(os.Stderr, "  SDK events:         /_aglet/events\n")
 	if len(blocks) > 0 {
 		fmt.Fprintf(os.Stderr, "\n  Available Blocks:\n")
 		for _, b := range blocks {
@@ -275,6 +283,63 @@ func parseSurfaceContract(path string) (map[string]ContractDependency, error) {
 		return nil, fmt.Errorf("invalid surface.yaml: %w", err)
 	}
 	return surface.Contract.Dependencies, nil
+}
+
+// handleInteractionEvents receives batched client-side interaction events from
+// the @aglet/sdk and appends them to the surface's logs.jsonl. The SDK buffers
+// events in the browser and flushes them periodically (every 5 min by default)
+// and on page unload via sendBeacon.
+//
+// Request body is a JSON array of interaction events:
+//
+//	[{"event":"interaction","timestamp":"...","caller":"FeedbackPanel","surface":"Dashboard","action":"button_click"}]
+func handleInteractionEvents(w http.ResponseWriter, r *http.Request, surfaceDir string) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error": "POST required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, `{"error": "failed to read body"}`, http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse the batch — array of interaction events
+	var events []map[string]interface{}
+	if err := json.Unmarshal(body, &events); err != nil {
+		http.Error(w, `{"error": "invalid JSON array"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Append each event to the surface's logs.jsonl
+	logPath := filepath.Join(surfaceDir, "logs.jsonl")
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "could not open log: %s"}`, err), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	for _, event := range events {
+		// Ensure source is marked as "sdk" so we can distinguish from
+		// server-side events in the logs
+		event["source"] = "sdk"
+		data, err := json.Marshal(event)
+		if err != nil {
+			continue
+		}
+		f.Write(data)
+		f.WriteString("\n")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok": true}`))
 }
 
 // parseSurfaceName reads the surface name from a surface.yaml file.
