@@ -1,12 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // StartDomainListener starts an HTTP server for a single domain.
@@ -26,6 +34,54 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 	// Discover all non-embedded blocks within this domain
 	blocks := discoverDomainBlocks(domainDir)
 
+	// --- Surface detection ---
+	// Look for a surface.yaml within this domain. If found, the listener
+	// becomes the single entry point: it proxies the frontend dev server,
+	// injects SDK config into HTML, and handles contract + block endpoints.
+	surfacePath, _ := findSurface(domainDir)
+	var surface *SurfaceYaml
+	var surfaceDir string
+	var devProxy *httputil.ReverseProxy
+	var sdkConfigScript string
+
+	if surfacePath != "" {
+		s, err := parseSurfaceYaml(surfacePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[aglet listen] Warning: could not parse surface.yaml: %s\n", err)
+		} else {
+			surface = s
+			surfaceDir = filepath.Dir(surfacePath)
+
+			// Build the SDK config script that will be injected into HTML
+			sdkConfigScript = buildSDKConfigScript(surface)
+
+			// Start the surface's dev server if a dev command is configured
+			if surface.Dev.Command != "" && surface.Dev.Port > 0 {
+				devCmd, err := startDevServer(surface, surfaceDir)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[aglet listen] Warning: could not start dev server: %s\n", err)
+				} else {
+					// Wait briefly for the dev server to start
+					waitForDevServer(surface.Dev.Port)
+
+					// Create a reverse proxy to the dev server
+					devURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", surface.Dev.Port))
+					devProxy = httputil.NewSingleHostReverseProxy(devURL)
+
+					// Intercept HTML responses to inject the SDK config
+					devProxy.ModifyResponse = func(resp *http.Response) error {
+						return injectSDKConfig(resp, sdkConfigScript)
+					}
+
+					fmt.Fprintf(os.Stderr, "[aglet listen] Surface: %s (proxying dev server on port %d)\n", surface.Name, surface.Dev.Port)
+
+					// Clean up the dev server when the listener exits
+					defer devCmd.Process.Kill()
+				}
+			}
+		}
+	}
+
 	mux := http.NewServeMux()
 
 	// Register block endpoints
@@ -41,30 +97,27 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 			return
 		}
 
-		// Read input from request body
 		input := readListenerInput(r)
 
-		// Find the block — first look in this domain, then project-wide
 		block, err := FindBlock(projectRoot, blockName)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error": "Block not found: %s"}`, err), http.StatusNotFound)
 			return
 		}
 
-		// Read surface observability context from headers
-		// (logged by the wrapper as part of the execution context)
-		caller := r.Header.Get("X-Aglet-Caller")
-		surface := r.Header.Get("X-Aglet-Surface")
-		if caller != "" || surface != "" {
-			// TODO: Pass caller/surface context through to wrapper for
-			// surface-level logging. For now, these headers are accepted
-			// but the surface logging integration happens in a later phase.
-			_ = caller
-			_ = surface
+		// Build wrapper options with surface context if available
+		opts := DefaultWrapOptions()
+		if surface != nil {
+			caller := r.Header.Get("X-Aglet-Caller")
+			opts.SurfaceContext = &SurfaceCallContext{
+				SurfaceDir:  surfaceDir,
+				SurfaceName: surface.Name,
+				Caller:      caller,
+				Contract:    blockName,
+			}
 		}
 
-		// Execute through the wrapper — full observability
-		output, err := WrapBlock(block, rootDomain, projectRoot, input)
+		output, err := WrapBlockWithOptions(block, rootDomain, projectRoot, input, opts)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error": "Block execution failed: %s"}`, err), http.StatusInternalServerError)
 			return
@@ -74,19 +127,63 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 		w.Write(output)
 	})
 
+	// Register contract endpoints if a surface was found
+	if surface != nil {
+		for depName, dep := range surface.Contract.Dependencies {
+			depName := depName
+			dep := dep
+
+			blockName := dep.Block
+			if blockName == "" {
+				blockName = depName
+			}
+
+			if _, err := FindBlock(projectRoot, blockName); err != nil {
+				fmt.Fprintf(os.Stderr, "  POST /contract/%s → Block '%s' (NOT FOUND)\n", depName, blockName)
+				continue
+			}
+
+			fmt.Fprintf(os.Stderr, "  POST /contract/%s → Block '%s'\n", depName, blockName)
+			contractName := depName
+			mux.HandleFunc("/contract/"+depName, func(w http.ResponseWriter, r *http.Request) {
+				handleContractBlockRequest(w, r, blockName, projectRoot, rootDomain, surfaceDir, surface.Name, contractName)
+			})
+		}
+
+		// SDK interaction events endpoint
+		mux.HandleFunc("/_aglet/events", func(w http.ResponseWriter, r *http.Request) {
+			handleInteractionEvents(w, r, surfaceDir)
+		})
+	}
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","domain":"%s"}`, rootDomain.Name)
 	})
 
-	// CORS middleware for development
+	// If we have a dev proxy, add a catch-all that forwards unmatched
+	// requests to the frontend dev server (Vite, Next, etc.)
+	if devProxy != nil {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			devProxy.ServeHTTP(w, r)
+		})
+	}
+
 	handler := corsMiddleware(mux)
 
 	// Print startup info
-	fmt.Fprintf(os.Stderr, "[aglet listen] Domain: %s\n", rootDomain.Name)
+	fmt.Fprintf(os.Stderr, "\n[aglet listen] Domain: %s\n", rootDomain.Name)
 	fmt.Fprintf(os.Stderr, "[aglet listen] Listening on http://localhost:%d\n", port)
-	fmt.Fprintf(os.Stderr, "  Block endpoint: POST /block/{BlockName}\n")
+	fmt.Fprintf(os.Stderr, "  Block endpoint:    POST /block/{BlockName}\n")
+	if surface != nil {
+		fmt.Fprintf(os.Stderr, "  Contract endpoint: POST /contract/{Name}\n")
+		fmt.Fprintf(os.Stderr, "  SDK events:        POST /_aglet/events\n")
+	}
+	if devProxy != nil {
+		fmt.Fprintf(os.Stderr, "  Frontend proxy:    → localhost:%d\n", surface.Dev.Port)
+		fmt.Fprintf(os.Stderr, "  SDK config:        injected into HTML responses\n")
+	}
 	if len(blocks) > 0 {
 		fmt.Fprintf(os.Stderr, "\n  Available Blocks:\n")
 		for _, b := range blocks {
@@ -102,6 +199,121 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 	fmt.Fprintf(os.Stderr, "\n")
 
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), handler)
+}
+
+// parseSurfaceYaml reads and parses a surface.yaml file.
+func parseSurfaceYaml(path string) (*SurfaceYaml, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var surface SurfaceYaml
+	if err := yaml.Unmarshal(data, &surface); err != nil {
+		return nil, err
+	}
+	return &surface, nil
+}
+
+// buildSDKConfigScript creates the <script> tag content that will be injected
+// into HTML responses. This is how surface.yaml config reaches the SDK in the
+// browser — the listener reads the yaml, the browser reads the global.
+func buildSDKConfigScript(surface *SurfaceYaml) string {
+	config := map[string]interface{}{
+		"surface": surface.Name,
+	}
+
+	// Apply SDK config from surface.yaml, with defaults
+	flushInterval := 300
+	if surface.SDK.FlushInterval > 0 {
+		flushInterval = surface.SDK.FlushInterval
+	}
+	config["flushInterval"] = flushInterval
+
+	trackInteractions := true
+	if surface.SDK.TrackInteractions != nil {
+		trackInteractions = *surface.SDK.TrackInteractions
+	}
+	config["trackInteractions"] = trackInteractions
+
+	data, _ := json.Marshal(config)
+	return fmt.Sprintf(`<script>window.__AGLET__=%s;</script>`, string(data))
+}
+
+// startDevServer starts the surface's frontend dev server as a child process.
+// The command comes from surface.yaml's dev.command field.
+func startDevServer(surface *SurfaceYaml, surfaceDir string) (*exec.Cmd, error) {
+	parts := strings.Fields(surface.Dev.Command)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty dev command")
+	}
+
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Dir = surfaceDir
+	cmd.Stdout = os.Stderr // Dev server output goes to stderr (same as aglet's own output)
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PORT=%d", surface.Dev.Port), // Some frameworks respect PORT env var
+	)
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start dev server: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "[aglet listen] Starting dev server: %s (port %d)\n", surface.Dev.Command, surface.Dev.Port)
+	return cmd, nil
+}
+
+// waitForDevServer polls the dev server port until it responds or times out.
+func waitForDevServer(port int) {
+	addr := fmt.Sprintf("http://localhost:%d", port)
+	for i := 0; i < 30; i++ {
+		resp, err := http.Get(addr)
+		if err == nil {
+			resp.Body.Close()
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	fmt.Fprintf(os.Stderr, "[aglet listen] Warning: dev server on port %d not responding after 15s — proxying anyway\n", port)
+}
+
+// injectSDKConfig intercepts HTML responses from the dev server and injects
+// the SDK config script tag before </head>. This is how surface.yaml config
+// reaches the @aglet/sdk running in the browser.
+func injectSDKConfig(resp *http.Response, scriptTag string) error {
+	// Only inject into HTML responses
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		return nil
+	}
+
+	// Read the entire response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+
+	// Inject the script tag before </head> (or at the end if no </head> found)
+	injected := body
+	headClose := []byte("</head>")
+	if idx := bytes.Index(bytes.ToLower(body), headClose); idx >= 0 {
+		// Insert the script tag right before </head>
+		injected = make([]byte, 0, len(body)+len(scriptTag))
+		injected = append(injected, body[:idx]...)
+		injected = append(injected, []byte(scriptTag)...)
+		injected = append(injected, body[idx:]...)
+	} else {
+		// No </head> found — append to the end
+		injected = append(body, []byte(scriptTag)...)
+	}
+
+	// Replace the response body and update Content-Length
+	resp.Body = io.NopCloser(bytes.NewReader(injected))
+	resp.ContentLength = int64(len(injected))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(injected)))
+
+	return nil
 }
 
 // discoverDomainBlocks finds all blocks within a domain directory.

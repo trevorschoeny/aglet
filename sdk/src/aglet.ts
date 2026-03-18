@@ -8,6 +8,23 @@ const DEFAULT_FLUSH_INTERVAL = 300;
 const EVENTS_ENDPOINT = "/_aglet/events";
 
 /**
+ * Reads SDK config injected by the domain listener into the HTML.
+ * The listener reads surface.yaml and injects:
+ *   <script>window.__AGLET__ = {surface: "Dashboard", flushInterval: 300, ...}</script>
+ *
+ * Returns the config object, or an empty object if not found (e.g., no
+ * listener proxying, or running in a test environment).
+ */
+function getInjectedConfig(): Partial<AgletOptions> {
+  if (typeof window === "undefined") return {};
+  const config = (window as unknown as Record<string, unknown>).__AGLET__;
+  if (config && typeof config === "object") {
+    return config as Partial<AgletOptions>;
+  }
+  return {};
+}
+
+/**
  * createAglet creates an SDK instance bound to a specific component.
  *
  * Each component in a Surface should create its own instance so that
@@ -22,10 +39,16 @@ export function createAglet(
   component: string,
   options: AgletOptions = {},
 ): AgletInstance {
-  const surface = options.surface ?? "";
-  const baseUrl = options.baseUrl ?? "";
-  const flushIntervalSec = options.flushInterval ?? DEFAULT_FLUSH_INTERVAL;
-  const trackEnabled = options.trackInteractions ?? true;
+  // Merge config: explicit options > injected from surface.yaml > defaults.
+  // The domain listener injects surface.yaml config into the HTML via
+  // window.__AGLET__. Explicit options always win.
+  const injected = getInjectedConfig();
+  const surface = options.surface ?? injected.surface ?? "";
+  const baseUrl = options.baseUrl ?? injected.baseUrl ?? "";
+  const flushIntervalSec =
+    options.flushInterval ?? injected.flushInterval ?? DEFAULT_FLUSH_INTERVAL;
+  const trackEnabled =
+    options.trackInteractions ?? injected.trackInteractions ?? true;
 
   // --- Event buffer ---
   // Interaction events accumulate here and are flushed periodically.

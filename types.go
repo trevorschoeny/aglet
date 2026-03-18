@@ -95,11 +95,15 @@ type SurfaceYaml struct {
 	Entry       string                       `yaml:"entry"`
 	Framework   string                       `yaml:"framework"`
 	Bundler     string                       `yaml:"bundler"`
-	Dev         struct {
+	Dev struct {
 		Command string `yaml:"command"`
 		Port    int    `yaml:"port"`
 	} `yaml:"dev"`
-	Contract    SurfaceContract              `yaml:"contract"`
+	SDK struct {
+		FlushInterval     int  `yaml:"flush_interval"`    // SDK flush interval in seconds. Default: 300
+		TrackInteractions *bool `yaml:"track_interactions"` // Whether SDK tracks interactions. Default: true (pointer to detect unset vs false)
+	} `yaml:"sdk"`
+	Contract SurfaceContract `yaml:"contract"`
 }
 
 // SurfaceContract holds the contract section of surface.yaml.
