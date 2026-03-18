@@ -224,6 +224,12 @@ func blockYAML(uuid, name, domain, runtime, lang, model string) string {
 		role = "classifier"
 	}
 
+	// Observe events — reasoning blocks also track tool.call
+	observeEvents := "[start, complete, error]"
+	if runtime == "reasoning" {
+		observeEvents = "[start, complete, error, tool.call]"
+	}
+
 	return fmt.Sprintf(`id: %s
 name: %s
 description: "TODO: One-line summary"
@@ -240,7 +246,11 @@ schema:
     type: object
     properties: {}
     required: []
-`, uuid, name, domain, role, runtime, runtimeLines.String())
+
+observe:
+  log: ./logs.jsonl
+  events: %s
+`, uuid, name, domain, role, runtime, runtimeLines.String(), observeEvents)
 }
 
 func blockIntent(name string) string {
@@ -394,6 +404,9 @@ func domainYAML(uuid, name, parent string) string {
 	}
 	return fmt.Sprintf(`id: %s
 name: %s%s
+# listen: true
+# peers:
+#   other-domain: "http://localhost:8081"
 `, uuid, name, parentLine)
 }
 
@@ -422,6 +435,9 @@ bundler: vite
 dev:
   command: "npm run dev"
   port: 5173
+
+sdk:
+  flush_interval: 300
 
 contract: {}
 `, uuid, name, domain)
@@ -487,14 +503,26 @@ TODO: Key choices and their reasoning.
 }
 
 func componentImpl(name string) string {
-	return fmt.Sprintf(`// TODO: Define props based on what this Component needs
+	return fmt.Sprintf(`import { useEffect } from "react";
+import { createAglet } from "@aglet/sdk";
+
 interface %sProps {}
 
 export function %s({}: %sProps) {
+  // SDK — lifecycle tracking and contract calls
+  useEffect(() => {
+    const aglet = createAglet("%s");
+    aglet.mount();
+    return () => {
+      aglet.unmount();
+      aglet.destroy();
+    };
+  }, []);
+
   // TODO: Implement component
   return <div>%s</div>;
 }
-`, name, name, name, name)
+`, name, name, name, name, name)
 }
 
 // --- Helpers ---
@@ -624,6 +652,7 @@ func printCreated(unitType, name, variant, dir string) {
 	case "component":
 		fmt.Fprintf(os.Stderr, "  Edit intent.md   — what UX does this component own?\n")
 		fmt.Fprintf(os.Stderr, "  Add consumes     — declare contract dependencies in component.yaml\n")
+		fmt.Fprintf(os.Stderr, "  SDK is wired     — mount/unmount are scaffolded in the .tsx\n")
 	case "domain":
 		fmt.Fprintf(os.Stderr, "  Edit intent.md   — what lives here and why?\n")
 		fmt.Fprintf(os.Stderr, "  aglet new block <Name>  — add your first Block\n")
