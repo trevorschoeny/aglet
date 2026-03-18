@@ -110,6 +110,21 @@ schema:
 
 These fields are irrelevant for embedded and reasoning Blocks. If omitted, values are inherited from the domain chain.
 
+### Observe Fields
+
+```yaml
+observe:
+  log: ./logs.jsonl
+  events: [start, complete, error, tool.call]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `observe.log` | No | Path to the log file, relative to the block directory. Default: `./logs.jsonl`. |
+| `observe.events` | No | Which events the wrapper should log. Default: `[start, complete, error, tool.call]`. |
+
+The `observe` section declares the block's observability contract. The block wrapper reads this and logs the specified events. Any execution environment that implements the Aglet wrapper protocol — the CLI, a Docker container, a WASM host — reads the same declaration and produces the same logs. See the [Runtime Architecture](/spec/runtime) spec for how wrappers use this.
+
 ### Reasoning-Specific Fields
 
 | Field | Required | Description |

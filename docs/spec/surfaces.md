@@ -53,6 +53,19 @@ dev:
 
 If a project has multiple Surfaces, each declares its own port to avoid conflicts.
 
+### SDK Fields
+
+```yaml
+sdk:
+  flush_interval: 300    # Event flush interval in seconds (default: 300)
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `sdk.flush_interval` | No | How often the `@aglet/sdk` flushes buffered client-side events to the domain listener, in seconds. Default: 300 (5 minutes). |
+
+The domain listener reads this section and injects it into the HTML as `window.__AGLET__` so the SDK auto-configures. See the [Observability](#observability) section for full details.
+
 ### Full Example
 
 ```yaml
