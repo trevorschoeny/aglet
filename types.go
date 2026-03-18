@@ -25,13 +25,15 @@ type BlockYaml struct {
 
 // DomainYaml represents the parsed domain.yaml.
 type DomainYaml struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name"`
-	Parent      string            `yaml:"parent"`
-	Entrypoints []string          `yaml:"entrypoints"`
-	Runners     map[string]string `yaml:"runners"`
+	ID          string                    `yaml:"id"`
+	Name        string                    `yaml:"name"`
+	Parent      string                    `yaml:"parent"`
+	Entrypoints []string                  `yaml:"entrypoints"`
+	Runners     map[string]string         `yaml:"runners"`
 	Providers   map[string]ProviderConfig `yaml:"providers"`
-	Defaults    DomainDefaults    `yaml:"defaults"`
+	Defaults    DomainDefaults            `yaml:"defaults"`
+	Listen      bool                      `yaml:"listen"`          // Opt-in: this domain can be deployed as a listener
+	Peers       map[string]string         `yaml:"peers,omitempty"` // Cross-domain routing: domain name → URL
 }
 
 // ProviderConfig holds LLM provider connection details.

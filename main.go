@@ -27,7 +27,13 @@ func main() {
 		handleReason()
 	case "pipe":
 		handlePipe()
+	case "listen":
+		handleListen()
 	case "serve":
+		// Deprecated: aglet serve is replaced by aglet listen (per-domain listener).
+		// Keep it working for backward compatibility with a deprecation warning.
+		fmt.Fprintf(os.Stderr, "[aglet] Warning: 'aglet serve' is deprecated — use 'aglet listen' instead.\n")
+		fmt.Fprintf(os.Stderr, "         'aglet listen' runs a per-domain listener (same binary, dev/prod parity).\n\n")
 		handleServe()
 	case "validate":
 		handleValidate()
@@ -53,7 +59,8 @@ Commands:
   run <BlockName> [input.json]          Find and execute a Block by name
   reason <BlockDir> [input.json]        Execute a reasoning Block directly from its directory
   pipe <StartBlock> [EndBlock]          Execute a pipeline by following calls edges
-  serve [--port PORT]                   Start an HTTP dev server from a Surface's contract
+  listen [--port PORT]                  Start a per-domain listener (replaces serve)
+  serve [--port PORT]                   (deprecated — use listen)
   init <ProjectName> [flags]            Bootstrap a new Aglet project
   new <type> <name> [flags]             Scaffold a new Block, Domain, Surface, or Component
   stats [BlockName] [--domain D] [--project] [--write] [--json]  Behavioral memory from logs
