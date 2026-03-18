@@ -46,6 +46,7 @@ export default defineConfig({
             { text: 'Intent', link: '/spec/intent' },
             { text: 'Guardrails', link: '/spec/guardrails' },
             { text: 'Adaptive Memory Layer', link: '/spec/aml' },
+            { text: 'Runtime Architecture', link: '/spec/runtime' },
           ]
         }
       ],
