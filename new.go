@@ -63,10 +63,12 @@ func handleNew() {
 // newBlock scaffolds a complete Block directory.
 // Supports three runtimes: process (default), embedded, reasoning.
 // Supports three languages for process/embedded: go (default), ts, py.
+// Supports --model for reasoning blocks — mirrors `aglet init --model`.
 func newBlock(dir, name string, flags newFlags, cwd string) error {
 	runtime := flags.get("runtime", "process")
 	lang := flags.get("lang", defaultLangForRuntime(runtime))
 	domain := flags.get("domain", inferDomainName(cwd))
+	model := flags.get("model", "") // only meaningful for reasoning runtime
 
 	if domain == "" {
 		fmt.Fprintf(os.Stderr, "[aglet new] Warning: could not infer domain — set 'domain' in %s/block.yaml manually\n", name)
@@ -79,7 +81,7 @@ func newBlock(dir, name string, flags newFlags, cwd string) error {
 	uuid := generateTypedUUID("b")
 
 	// block.yaml — always required
-	if err := writeFile(filepath.Join(dir, "block.yaml"), blockYAML(uuid, name, domain, runtime, lang)); err != nil {
+	if err := writeFile(filepath.Join(dir, "block.yaml"), blockYAML(uuid, name, domain, runtime, lang, model)); err != nil {
 		return err
 	}
 
@@ -197,14 +199,23 @@ func newComponent(dir, name string, flags newFlags, cwd string) error {
 // --- Template Functions ---
 // Each returns the file content as a string. Name substitution is done here.
 
-func blockYAML(uuid, name, domain, runtime, lang string) string {
-	// Determine the impl field — only relevant for process and embedded
-	implLine := ""
+func blockYAML(uuid, name, domain, runtime, lang, model string) string {
+	// Determine the impl/prompt/model lines — varies by runtime
+	var runtimeLines strings.Builder
 	switch runtime {
 	case "process", "embedded":
-		implLine = fmt.Sprintf("\nimpl: ./%s\n", mainFile(lang))
+		// impl points to the generated main.* file
+		runtimeLines.WriteString(fmt.Sprintf("\nimpl: ./%s\n", mainFile(lang)))
 	case "reasoning":
-		implLine = "\nprompt: ./prompt.md\n"
+		runtimeLines.WriteString("\nprompt: ./prompt.md\n")
+		if model != "" {
+			// Explicit model provided — write it directly
+			runtimeLines.WriteString(fmt.Sprintf("model: %s\n", model))
+		} else {
+			// No model provided — include a commented stub so the user knows where to put it.
+			// Will use domain default if present; otherwise the block won't run until this is filled.
+			runtimeLines.WriteString("# model: claude-sonnet-4-20250514  # inherits from domain default if omitted\n")
+		}
 	}
 
 	// Role defaults that make sense per runtime
@@ -229,7 +240,7 @@ schema:
     type: object
     properties: {}
     required: []
-`, uuid, name, domain, role, runtime, implLine)
+`, uuid, name, domain, role, runtime, runtimeLines.String())
 }
 
 func blockIntent(name string) string {
@@ -570,7 +581,8 @@ func writeFile(path, content string) error {
 	return nil
 }
 
-// printCreated reports the created unit and its files to stderr.
+// printCreated reports the created unit and its files, then gives a context-aware
+// hint about what to do next. Mirrors the UX of `aglet init`.
 func printCreated(unitType, name, variant, dir string) {
 	label := unitType
 	if variant != "" {
@@ -585,6 +597,38 @@ func printCreated(unitType, name, variant, dir string) {
 			fmt.Fprintf(os.Stderr, "  %s/%s\n", name, e.Name())
 		}
 	}
+
+	// Context-aware next steps — point the user (and any agent) at what matters most
+	fmt.Fprintf(os.Stderr, "\nNext:\n")
+	switch unitType {
+	case "block":
+		// Pull runtime out of variant string (e.g. "block (reasoning/)")
+		switch {
+		case strings.HasPrefix(variant, "reasoning"):
+			fmt.Fprintf(os.Stderr, "  Edit intent.md   — why does this reasoning exist?\n")
+			fmt.Fprintf(os.Stderr, "  Write prompt.md  — this is your implementation\n")
+			fmt.Fprintf(os.Stderr, "  Fill schema      — define in/out in block.yaml\n")
+		case strings.HasPrefix(variant, "embedded"):
+			fmt.Fprintf(os.Stderr, "  Edit intent.md   — why does this transformation exist?\n")
+			fmt.Fprintf(os.Stderr, "  Fill schema      — define in/out in block.yaml\n")
+			fmt.Fprintf(os.Stderr, "  Implement        — pure function in main.*\n")
+		default: // process
+			fmt.Fprintf(os.Stderr, "  Edit intent.md   — why does this block exist?\n")
+			fmt.Fprintf(os.Stderr, "  Fill schema      — define in/out in block.yaml\n")
+			fmt.Fprintf(os.Stderr, "  Implement        — read stdin, write stdout in main.*\n")
+		}
+	case "surface":
+		fmt.Fprintf(os.Stderr, "  Edit intent.md   — the vision for this frontend\n")
+		fmt.Fprintf(os.Stderr, "  Add dependencies — fill the contract in surface.yaml\n")
+		fmt.Fprintf(os.Stderr, "  aglet new component <Name>  — add your first Component\n")
+	case "component":
+		fmt.Fprintf(os.Stderr, "  Edit intent.md   — what UX does this component own?\n")
+		fmt.Fprintf(os.Stderr, "  Add consumes     — declare contract dependencies in component.yaml\n")
+	case "domain":
+		fmt.Fprintf(os.Stderr, "  Edit intent.md   — what lives here and why?\n")
+		fmt.Fprintf(os.Stderr, "  aglet new block <Name>  — add your first Block\n")
+	}
+	fmt.Fprintf(os.Stderr, "\n")
 }
 
 // newFlags is a simple key→value map for parsed --flag value pairs.
@@ -625,6 +669,7 @@ Block flags:
   --runtime process|embedded|reasoning   Default: process
   --lang    go|ts|py                     Default: go (process), ts (embedded)
   --domain  <name>                       Default: inferred from nearest domain.yaml
+  --model   <model>                      LLM model (reasoning only, e.g. claude-sonnet-4-20250514)
 
 Domain flags:
   --parent  <name>                       Default: inferred from nearest domain.yaml
@@ -635,6 +680,7 @@ Surface/Component flags:
 Examples:
   aglet new block FetchPage
   aglet new block EmailClassifier --runtime reasoning
+  aglet new block EmailClassifier --runtime reasoning --model claude-sonnet-4-20250514
   aglet new block StripSignature --runtime embedded
   aglet new block ParseDate --lang py
   aglet new domain intelligence

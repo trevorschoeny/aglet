@@ -138,7 +138,7 @@ curl -X POST http://localhost:3001/contract/Analyze \
 
 ## aglet init
 
-Bootstrap a new Aglet project. Creates a root domain directory with a `domain.yaml` and `intent.md`, ready to scaffold Blocks and Surfaces into.
+Bootstrap a new Aglet project. Creates a root domain directory with `domain.yaml`, `intent.md`, and `CLAUDE.md`, ready to scaffold Blocks and Surfaces into.
 
 ```
 aglet init <ProjectName> [--model <model>]
@@ -189,6 +189,7 @@ The `domain` field is inferred automatically from the nearest ancestor `domain.y
 | `--runtime` | `process`, `embedded`, `reasoning` | `process` |
 | `--lang` | `go`, `ts`, `py` | `go` (process), `ts` (embedded) |
 | `--domain` | domain name | inferred from nearest `domain.yaml` |
+| `--model` | model identifier | *(reasoning only)* — uses domain default if omitted |
 
 ### Domain flags
 
@@ -208,8 +209,11 @@ The `domain` field is inferred automatically from the nearest ancestor `domain.y
 # Process block (Go, default)
 aglet new block FetchPage
 
-# Reasoning block
+# Reasoning block (uses domain model default)
 aglet new block EmailClassifier --runtime reasoning
+
+# Reasoning block with explicit model
+aglet new block EmailClassifier --runtime reasoning --model claude-sonnet-4-20250514
 
 # Embedded block (TypeScript)
 aglet new block StripSignature --runtime embedded
