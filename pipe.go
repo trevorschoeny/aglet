@@ -113,12 +113,35 @@ func (g *BlockGraph) FindPipelineFrom(start string) ([]string, error) {
 	}
 }
 
-// RunPipeline executes a sequence of Blocks, piping each one's stdout into the next's stdin.
-// Returns the final Block's output.
+// RunPipeline executes a pipeline of Blocks.
+//
+// If the pipeline has only one block (the start block), it calls WrapBlock
+// with forwarding enabled — the calls chain auto-propagates through the
+// declared edges. This is the normal case for `aglet pipe StartBlock`.
+//
+// If the pipeline has multiple blocks (explicit path via start + end),
+// it calls each block sequentially with forwarding DISABLED to prevent
+// double-execution of downstream blocks.
 func RunPipeline(blockNames []string, projectRoot string, rootDomain *DomainYaml, input []byte) ([]byte, error) {
 	if len(blockNames) == 0 {
 		return nil, fmt.Errorf("empty pipeline")
 	}
+
+	// Single block pipeline: just run it with auto-forwarding.
+	// The wrapper's calls forwarding handles the rest of the chain.
+	if len(blockNames) == 1 {
+		block, err := FindBlock(projectRoot, blockNames[0])
+		if err != nil {
+			return nil, fmt.Errorf("pipeline Block '%s': %w", blockNames[0], err)
+		}
+		fmt.Fprintf(os.Stderr, "[aglet pipe] %s (auto-forwarding via calls)\n", block.Config.Name)
+		return WrapBlock(block, rootDomain, projectRoot, input)
+	}
+
+	// Explicit path pipeline: run each block sequentially with forwarding
+	// disabled. The explicit path may differ from the calls graph, so we
+	// control the execution order manually.
+	noForward := WrapBlockOptions{ForwardCalls: false}
 
 	// Resolve all Blocks upfront so we fail fast on missing Blocks
 	blocks := make([]*DiscoveredBlock, len(blockNames))
@@ -135,7 +158,7 @@ func RunPipeline(blockNames []string, projectRoot string, rootDomain *DomainYaml
 	for i, block := range blocks {
 		fmt.Fprintf(os.Stderr, "[aglet pipe] %s (%d/%d)\n", block.Config.Name, i+1, len(blocks))
 
-		output, err := dispatchBlock(block, rootDomain, projectRoot, current)
+		output, err := WrapBlockWithOptions(block, rootDomain, projectRoot, current, noForward)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline failed at Block '%s' (step %d/%d): %w", block.Config.Name, i+1, len(blocks), err)
 		}
@@ -188,19 +211,30 @@ func handlePipe() {
 		os.Exit(1)
 	}
 
-	// Resolve the pipeline path
+	// Resolve the pipeline path.
+	// If no EndBlock is given, use auto-forwarding: just run the start block
+	// and let the wrapper propagate through calls edges automatically.
+	// If EndBlock is given, find the explicit path and run it sequentially.
 	var pipeline []string
 	if endBlock != "" {
 		pipeline, err = graph.FindPath(startBlock, endBlock)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "[aglet pipe] Pipeline: %s\n", strings.Join(pipeline, " → "))
 	} else {
-		pipeline, err = graph.FindPipelineFrom(startBlock)
+		// Auto-forwarding mode: just the start block.
+		// The wrapper's calls forwarding handles the chain.
+		// Still validate the pipeline exists by resolving it, but only run the start.
+		fullPipeline, pipeErr := graph.FindPipelineFrom(startBlock)
+		if pipeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", pipeErr)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "[aglet pipe] Pipeline: %s (auto-forwarding)\n", strings.Join(fullPipeline, " → "))
+		pipeline = []string{startBlock}
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Fprintf(os.Stderr, "[aglet pipe] Pipeline: %s\n", strings.Join(pipeline, " → "))
 
 	// Read input
 	// Check for input file as last arg
