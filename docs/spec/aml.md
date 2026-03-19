@@ -185,16 +185,4 @@ aglet stats EmailClassifier --json
 
 See the [CLI Reference](/cli/) for full flag documentation.
 
-## Future Features
-
-Features that are designed but not yet implemented. These represent the direction the AML is heading.
-
-- **Custom vitals metrics.** Developers will be able to declare custom metrics in block.yaml or domain.yaml that the wrapper tracks alongside the built-in ones. For example, a reasoning Block could track `avg_confidence` from its output schema, or a process Block could track `avg_output_size_kb`. The wrapper would read the metric definitions and compute them incrementally, same as the built-in vitals.
-
-- **YAML-driven SDK observability.** Surface and component observability config (what to track, flush intervals, interaction types) declared in surface.yaml and component.yaml, automatically injected into the client SDK via the domain listener. No code changes needed to adjust tracking behavior.
-
-- **Warmth-based wrapper cooldown.** Hot blocks (high warmth score) keep their wrappers alive between calls for zero cold-start latency. Cold blocks are fully serverless. The cooldown period would be configurable in the observe contract.
-
-- **WASM compilation.** `aglet build` compiles process blocks to WebAssembly modules for portable, near-instant execution. The wrapper becomes a WASM host instead of a subprocess spawner.
-
-- **Aglet Management System (AMS).** A hosted dashboard that aggregates vitals, logs, and behavioral data across domains, environments, and teams. The `sink` config in domain.yaml would point to the AMS endpoint. Think of it as what GitHub is to git — the collaboration and visibility layer on top of the protocol.
+See also: [Future Features](/spec/future) for planned capabilities.

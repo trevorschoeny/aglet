@@ -48,6 +48,7 @@ export default defineConfig({
             { text: 'Runtime Architecture', link: '/spec/runtime' },
             { text: 'Adaptive Memory Layer', link: '/spec/aml' },
             { text: 'Guardrails', link: '/spec/guardrails' },
+            { text: 'Future Features', link: '/spec/future' },
           ]
         }
       ],
