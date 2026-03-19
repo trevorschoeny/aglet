@@ -76,6 +76,43 @@ Tells the `aglet-reason` runner how to authenticate with and call LLM providers 
 
 The runner resolves which provider to use either implicitly from the model name (e.g., `claude-*` -> `anthropic`, `gpt-*` -> `openai`) or explicitly via a `provider` field in a reasoning Block's `block.yaml`.
 
+### Stores
+
+```yaml
+stores:
+  main:
+    driver: postgres
+    dsn: ${DATABASE_URL}
+  cache:
+    driver: redis
+    dsn: ${REDIS_URL}
+```
+
+Declares database and store connections available to Blocks in this domain. The wrapper resolves these at runtime and injects `AGLET_STORE_{NAME}` environment variables into process Blocks before execution. Developers use their own database libraries to connect — Aglet manages the wiring, not the queries.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `driver` | No | Informational label for the store type: `postgres`, `mysql`, `sqlite`, `redis`, `mongo`, `dynamodb`, etc. Helps humans and agents understand what kind of store this is. Not used by the runtime. |
+| `dsn` | Yes | Connection string. Use `${ENV_VAR}` references so secrets stay out of YAML. The wrapper resolves these against the process environment at runtime. |
+
+The environment variable convention is `AGLET_STORE_{NAME}` in uppercase. A store named `main` becomes `AGLET_STORE_MAIN`. A store named `cache` becomes `AGLET_STORE_CACHE`. The Block's implementation reads the env var and connects with whatever library it prefers:
+
+```go
+dsn := os.Getenv("AGLET_STORE_MAIN")
+db, err := pgx.Connect(ctx, dsn)
+```
+
+```python
+dsn = os.environ["AGLET_STORE_MAIN"]
+conn = psycopg.connect(dsn)
+```
+
+No Aglet SDK required. No ORM opinions. Just environment variables — the universal interface every database library already accepts.
+
+Stores inherit through the domain chain using the same merge-per-key pattern as runners: nearest domain takes precedence per store name, parent domains fill in any stores not defined locally. A sub-domain can override a parent's `main` store while inheriting its `cache` store.
+
+`aglet validate` warns if a DSN doesn't contain a `${...}` reference (possible hardcoded secret) and if a driver value is unrecognized.
+
 ### Defaults
 
 ```yaml
@@ -194,6 +231,11 @@ defaults:
   execution: sync
   error: propagate
   model: claude-sonnet-4-20250514
+
+# stores:
+#   main:
+#     driver: postgres
+#     dsn: ${DATABASE_URL}
 
 listen: true
 

@@ -6,28 +6,17 @@ title: Future Features
 
 Capabilities that are designed but not yet implemented. These represent where Aglet is heading.
 
-## Database Connectors
+## Database Connectors — Future Enhancements
 
-First-class database integration for Aglet blocks. Two approaches under consideration:
+Basic store configuration is implemented: `stores` in `domain.yaml` declares database connections, and the wrapper injects `AGLET_STORE_{NAME}` environment variables into process Blocks at runtime. Developers use their own database libraries. See the [Domains](/spec/domains) specification for details.
 
-**Option A: Protocol-level connectors.** A new `store` section in domain.yaml that declares database connections. Blocks reference stores by name. The wrapper handles connection lifecycle, pooling, and credential injection. Query builders (not ORMs) generate type-safe queries from schemas already declared in block.yaml.
+Future enhancements under consideration:
 
-```yaml
-# domain.yaml
-stores:
-  readings:
-    type: postgres
-    env: DATABASE_URL
-```
+**Query observability.** The AML could track query counts, latency, and error rates per store per Block — similar to how it tracks tool calls for reasoning Blocks. This would require a lightweight query proxy or instrumentation layer.
 
-```yaml
-# block.yaml
-store: readings
-```
+**Connection pooling.** For long-running domain listeners, a shared connection pool per store (e.g., PgBouncer-style) managed by the domain listener process rather than individual Block executions.
 
-**Option B: Developer-managed.** No special connector — developers use whatever database library they want inside their block implementations. The protocol stays out of the data layer entirely.
-
-The likely answer is somewhere between: a lightweight connector pattern that handles credentials and connection lifecycle, with query building left to the developer's chosen tools. The key constraint is that stores should be observable — the AML should know when a block reads or writes data, how long queries take, and whether they fail.
+**Block-level store declarations.** An optional `stores` field in `block.yaml` for explicit dependency declaration — making store dependencies visible to agents and `aglet validate` without requiring it.
 
 ## Secrets Management
 
@@ -160,10 +149,6 @@ Hot blocks (high warmth score) keep their wrappers alive between calls for zero 
 A hosted dashboard that aggregates vitals, logs, and behavioral data across domains, environments, and teams. The `sink` config in domain.yaml points to the AMS endpoint. What GitHub is to git — the collaboration and visibility layer on top of the protocol.
 
 The AMS would also be the enforcement layer for developer access control — the YAML declarations define the policy, the AMS enforces it.
-
-## Storage Integration
-
-First-class storage primitives for Aglet projects — persistent data stores that blocks and surfaces can read from and write to, declared in YAML and managed by the protocol. Replaces ad-hoc JSON file stores with something the AML can observe.
 
 ## Production Domain Listeners
 

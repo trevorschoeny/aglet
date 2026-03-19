@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // ResolvedConfig holds the fully-resolved inheritable config for a block.
@@ -11,6 +13,7 @@ type ResolvedConfig struct {
 	Runners   map[string]string
 	Model     string
 	Providers map[string]ProviderConfig
+	Stores    map[string]StoreConfig
 	Sink      string
 	Defaults  DomainDefaults
 }
@@ -123,6 +126,20 @@ func ResolveInheritedConfig(block *DiscoveredBlock, projectRoot string) *Resolve
 					}
 				}
 
+				// Stores: merge per-key (same pattern as runners — nearest takes precedence)
+				if rc.Stores == nil && len(domain.Stores) > 0 {
+					rc.Stores = make(map[string]StoreConfig)
+					for k, v := range domain.Stores {
+						rc.Stores[k] = v
+					}
+				} else if len(domain.Stores) > 0 {
+					for k, v := range domain.Stores {
+						if _, exists := rc.Stores[k]; !exists {
+							rc.Stores[k] = v
+						}
+					}
+				}
+
 				// Model: first wins
 				if rc.Model == "" {
 					rc.Model = domain.Defaults.Model
@@ -172,4 +189,35 @@ func ResolveInheritedConfig(block *DiscoveredBlock, projectRoot string) *Resolve
 	}
 
 	return rc
+}
+
+// envVarPattern matches ${VAR_NAME} references in strings.
+var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// resolveEnvVars replaces all ${VAR_NAME} references in s with the
+// corresponding environment variable values. Unset variables resolve
+// to empty strings. This is used to resolve DSN values at runtime
+// so secrets stay out of YAML files.
+func resolveEnvVars(s string) string {
+	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		varName := strings.TrimSuffix(strings.TrimPrefix(match, "${"), "}")
+		return os.Getenv(varName)
+	})
+}
+
+// ResolveStoreEnvVars builds the AGLET_STORE_{NAME} environment variables
+// for a block based on its resolved config. Each store's DSN has ${VAR}
+// references resolved against the current environment.
+// Returns a slice of "KEY=VALUE" strings ready for cmd.Env.
+func ResolveStoreEnvVars(config *ResolvedConfig) []string {
+	if len(config.Stores) == 0 {
+		return nil
+	}
+	var envVars []string
+	for name, store := range config.Stores {
+		envKey := "AGLET_STORE_" + strings.ToUpper(name)
+		envVal := resolveEnvVars(store.DSN)
+		envVars = append(envVars, envKey+"="+envVal)
+	}
+	return envVars
 }

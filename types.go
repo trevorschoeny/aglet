@@ -40,9 +40,10 @@ type DomainYaml struct {
 	Runners     map[string]string         `yaml:"runners"`
 	Providers   map[string]ProviderConfig `yaml:"providers"`
 	Defaults    DomainDefaults            `yaml:"defaults"`
-	Listen      bool                      `yaml:"listen"`          // Opt-in: this domain can be deployed as a listener
-	Peers       map[string]string         `yaml:"peers,omitempty"` // Cross-domain routing: domain name → URL
-	Aglet       AgletConfig               `yaml:"aglet,omitempty"` // Runtime data config (sink, etc.)
+	Stores      map[string]StoreConfig    `yaml:"stores,omitempty"`  // Database/store connections: name → config
+	Listen      bool                      `yaml:"listen"`            // Opt-in: this domain can be deployed as a listener
+	Peers       map[string]string         `yaml:"peers,omitempty"`   // Cross-domain routing: domain name → URL
+	Aglet       AgletConfig               `yaml:"aglet,omitempty"`   // Runtime data config (sink, etc.)
 }
 
 // AgletConfig holds runtime data configuration for a domain.
@@ -55,6 +56,15 @@ type ProviderConfig struct {
 	Env    string `yaml:"env"`    // Environment variable for API key
 	URL    string `yaml:"url"`    // Custom API endpoint (optional)
 	Format string `yaml:"format"` // "anthropic" or "openai" (optional, inferred for built-ins)
+}
+
+// StoreConfig holds database/store connection details declared in domain.yaml.
+// The wrapper resolves these and injects AGLET_STORE_{NAME} environment variables
+// into process blocks at execution time. Developers use their own database
+// libraries to connect — Aglet just manages the wiring.
+type StoreConfig struct {
+	Driver string `yaml:"driver"` // postgres, mysql, sqlite, redis, etc. (informational — helps humans and agents understand the store type)
+	DSN    string `yaml:"dsn"`    // Connection string — typically a ${ENV_VAR} reference so secrets stay out of YAML
 }
 
 // DomainDefaults holds inheritable defaults.

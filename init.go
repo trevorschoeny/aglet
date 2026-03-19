@@ -126,6 +126,14 @@ runners:
 #   openai:
 #     env: OPENAI_API_KEY
 
+# stores declares database connections available to Blocks in this domain.
+# The wrapper injects AGLET_STORE_{NAME} env vars into process Blocks at runtime.
+# Use ${ENV_VAR} references so secrets stay out of YAML.
+# stores:
+#   main:
+#     driver: postgres
+#     dsn: ${DATABASE_URL}
+
 %s
 aglet:
   sink: local

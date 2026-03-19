@@ -108,7 +108,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 
 	switch block.Config.Runtime {
 	case "process", "":
-		result = ExecuteProcessBlock(block, rootDomain, input)
+		result = ExecuteProcessBlock(block, rootDomain, projectRoot, input)
 	case "reasoning":
 		result = ExecuteReasoningBlock(block, rootDomain, projectRoot, input)
 	case "embedded":

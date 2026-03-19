@@ -79,6 +79,7 @@ func RunValidate(projectRoot string) error {
 	allErrors = append(allErrors, checkSurfaces(inv)...)
 	allErrors = append(allErrors, checkComponents(inv)...)
 	allErrors = append(allErrors, checkDomains(inv)...)
+	allErrors = append(allErrors, checkStores(inv)...)
 
 	// Phase 3: Apply auto-fixes and separate remaining errors
 	var fixed []ValidationError
@@ -1014,6 +1015,59 @@ func checkDomains(inv *ProjectInventory) []ValidationError {
 				errors = append(errors, ValidationError{
 					Unit:    label,
 					Message: fmt.Sprintf("parent '%s' does not match any domain.yaml in the project (no ancestor domain found to infer from)", d.Config.Parent),
+				})
+			}
+		}
+	}
+
+	return errors
+}
+
+// checkStores validates store declarations in domain.yaml files.
+// Warns on potential security issues (hardcoded secrets) and unrecognized drivers.
+func checkStores(inv *ProjectInventory) []ValidationError {
+	var errors []ValidationError
+
+	// Known store drivers — warning (not error) if unrecognized
+	knownDrivers := map[string]bool{
+		"postgres":  true,
+		"mysql":     true,
+		"sqlite":    true,
+		"redis":     true,
+		"mongo":     true,
+		"dynamodb":  true,
+		"mariadb":   true,
+		"cockroach": true,
+	}
+
+	for _, d := range inv.Domains {
+		if len(d.Config.Stores) == 0 {
+			continue
+		}
+		label := d.Config.Name + " (domain)"
+
+		for storeName, store := range d.Config.Stores {
+			// Warn if DSN doesn't contain a ${...} reference — possible hardcoded secret
+			if store.DSN != "" && !strings.Contains(store.DSN, "${") {
+				errors = append(errors, ValidationError{
+					Unit:    label,
+					Message: fmt.Sprintf("store '%s' DSN does not use a ${VAR} reference — credentials may be hardcoded in YAML (use ${ENV_VAR} instead)", storeName),
+				})
+			}
+
+			// Warn if DSN is empty
+			if store.DSN == "" {
+				errors = append(errors, ValidationError{
+					Unit:    label,
+					Message: fmt.Sprintf("store '%s' has no dsn field", storeName),
+				})
+			}
+
+			// Warn if driver is unrecognized (not an error — custom drivers are valid)
+			if store.Driver != "" && !knownDrivers[store.Driver] {
+				errors = append(errors, ValidationError{
+					Unit:    label,
+					Message: fmt.Sprintf("store '%s' has unrecognized driver '%s' (known: postgres, mysql, sqlite, redis, mongo, dynamodb)", storeName, store.Driver),
 				})
 			}
 		}

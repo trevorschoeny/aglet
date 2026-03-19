@@ -15,7 +15,7 @@ import (
 //
 // This function has NO side effects on logs. It returns everything the wrapper
 // needs to write observability data via ExecutionResult.
-func ExecuteProcessBlock(block *DiscoveredBlock, rootDomain *DomainYaml, input []byte) *ExecutionResult {
+func ExecuteProcessBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte) *ExecutionResult {
 	// Resolve implementation file
 	implRaw := block.Config.Impl
 	if implRaw == "" {
@@ -57,6 +57,17 @@ func ExecuteProcessBlock(block *DiscoveredBlock, rootDomain *DomainYaml, input [
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = block.Dir
+
+	// Inject AGLET_STORE_* environment variables for any stores declared
+	// in the domain chain. The block's implementation reads these to connect
+	// to databases — no Aglet SDK needed, just standard env vars.
+	config := ResolveInheritedConfig(block, projectRoot)
+	storeEnvVars := ResolveStoreEnvVars(config)
+	if len(storeEnvVars) > 0 {
+		// Start with the current environment (so the block inherits PATH, etc.)
+		// then append the store variables on top.
+		cmd.Env = append(os.Environ(), storeEnvVars...)
+	}
 
 	// Capture stdout and stderr into separate buffers.
 	// Unlike the old cmd.Output() approach, this captures stderr ALWAYS —

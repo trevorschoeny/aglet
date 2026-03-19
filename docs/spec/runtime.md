@@ -55,6 +55,8 @@ If the request includes surface context (which surface and component initiated t
 
 The actual code — `main.py`, `main.go`, `prompt.md`, or a `.wasm` module. Reads JSON from stdin, writes JSON to stdout, exits. Knows nothing about the wrapper, the listener, the network, or the Aglet protocol. Pure function.
 
+If the domain declares `stores`, the wrapper injects `AGLET_STORE_{NAME}` environment variables into the process before execution. The implementation reads these to connect to databases using its own preferred library. No Aglet SDK needed — just standard env vars.
+
 ## Implementation vs. Wrapper
 
 This is a key distinction.

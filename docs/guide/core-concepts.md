@@ -44,6 +44,7 @@ Domains carry configuration that their children inherit:
 
 - **`runners`** maps file extensions to execution commands. A Block with `impl: ./main.py` uses the `.py` runner from the nearest ancestor domain.
 - **`providers`** configures LLM API access. Each provider has an `env` field pointing to the API key environment variable, and optional `url` and `format` fields for custom endpoints.
+- **`stores`** declares database connections. Each store has a `driver` (informational) and `dsn` (connection string, typically a `${ENV_VAR}` reference). The wrapper injects `AGLET_STORE_{NAME}` env vars into process Blocks at runtime.
 - **`defaults`** sets inheritable values for `execution`, `error`, and `model`.
 
 ### Config Inheritance
