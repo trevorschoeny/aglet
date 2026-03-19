@@ -20,7 +20,7 @@ The CLI finds the project root by walking up from your current working directory
 
 ## aglet run
 
-Find and execute a single Block by name. The CLI scans the project tree for a `block.yaml` whose `name` field matches the argument. On success, `behavioral_memory` in the Block's `block.yaml` is updated automatically — the AML observing passively.
+Find and execute a single Block by name. The CLI scans the project tree for a `block.yaml` whose `name` field matches the argument. On success, vitals in `.aglet/{blockName}/vitals.json` are updated incrementally — the AML observing passively.
 
 ```
 aglet run <BlockName> [input.json]
@@ -274,7 +274,7 @@ aglet new component ConversationList
 
 Read a Block's `logs.jsonl` and surface its behavioral profile — the AML's interface in the CLI. Stats are distilled from raw execution events: calls, duration, errors, and recency.
 
-`behavioral_memory` in `block.yaml` is updated **automatically** after every successful `aglet run` — no flags needed. The AML observes passively. `aglet stats --write` is for explicit on-demand updates (e.g., after bulk runs or in CI).
+Vitals in `.aglet/{blockName}/vitals.json` are updated **automatically** after every `aglet run` — no flags needed. The AML observes passively. `aglet stats` is for on-demand analysis including cross-block caller scans.
 
 ```
 aglet stats [BlockName] [--domain DOMAIN] [--project] [--write] [--json]
@@ -286,8 +286,7 @@ aglet stats [BlockName] [--domain DOMAIN] [--project] [--write] [--json]
 |---|---|
 | `--domain DOMAIN` | On-the-fly rollup for all blocks in a named domain (not stored) |
 | `--project` | Show the project-wide thermal map for all blocks (sorted by warmth) |
-| `--write` | Write the computed `behavioral_memory` section back into `block.yaml` |
-| `--json` | Output behavioral memory as JSON (for tooling/EI integration) |
+| `--json` | Output vitals as JSON (for tooling/agent integration) |
 
 ### Warmth
 
@@ -301,56 +300,46 @@ Warmth is a single signal that combines **recency** (70%) and **frequency** (30%
 
 A cold Block in the middle of a hot pipeline is a signal: has it been checked lately?
 
-### behavioral_memory in block.yaml
+### vitals.json
 
-`aglet run` automatically appends and updates this reserved section in `block.yaml` after each successful execution. `aglet stats --write` does the same on demand.
+Vitals are stored in `.aglet/{blockName}/vitals.json` — separate from source code. Updated incrementally after every execution by the block wrapper (O(1), no log scanning). `aglet stats` can recompute from logs for cross-block analysis.
 
 **Accumulation model: checkpoint + delta.** Each `aglet stats` run only processes log entries newer than the previous `last_updated` checkpoint — it doesn't recount from scratch. If the block's implementation file changes (a `block.updated` event appears in `logs.jsonl` with a newer timestamp), the measurement window resets and `version_since` is updated.
 
-```yaml
-# AML — written by `aglet stats --write`, do not edit manually
-behavioral_memory:
-  total_calls: 847
-  avg_runtime_ms: 24.3
-  error_rate: 0.0012
-  warmth_score: 0.91
-  warmth_level: hot
-  last_called: "2026-03-17T21:09:05Z"
-  version_since: "2026-03-10T14:22:00Z"   # reset on last code change
-  token_avg: 1240                          # reasoning blocks only
-  observed_callees:                        # tool blocks invoked during reasoning
-    ParseDate: 423
-    ExtractEntities: 847
-  observed_callers:                        # blocks that invoked this block as a tool
-    EmailClassifier: 1270
-    TestHarness: 42
-  last_updated: "2026-03-17T21:09:10Z"
+Vitals are stored in `.aglet/{blockName}/vitals.json` -- separate from source code. They're updated incrementally after every block execution (O(1), no log scanning). `aglet stats` can also recompute from logs for cross-block analysis.
+
+```json
+{
+  "total_calls": 847,
+  "avg_runtime_ms": 24.3,
+  "error_rate": 0.0012,
+  "warmth_score": 0.91,
+  "warmth_level": "hot",
+  "last_called": "2026-03-19T08:12:47Z",
+  "version_since": "2026-03-10T14:22:00Z",
+  "token_avg": 1240,
+  "observed_callees": { "ParseDate": 423, "ExtractEntities": 847 },
+  "observed_callers": { "TestHarness": 42 },
+  "last_updated": "2026-03-19T08:12:49Z"
+}
 ```
 
-This is the Adaptive Memory Layer write-back: the Semantic Overlay becomes both declarative (what you declared) and behavioral (what the system learned). Any EI tool can read a single `block.yaml` and understand both.
-
-`observed_callees` and `observed_callers` create a **runtime dependency graph** — who actually calls who, with frequency. This is distinct from the declared `tools` and `calls` fields, which express design intent. `aglet validate` compares the two and flags divergence.
+`observed_callees` and `observed_callers` create a **runtime dependency graph** — who actually calls who, with frequency. `aglet validate` compares these against declared `tools` and flags divergence.
 
 ### Examples
 
 ```bash
-# Single block stats (human-readable)
+# Single block vitals
 aglet stats PaymentAuth
 
-# Single block stats as JSON
+# JSON output
 aglet stats PaymentAuth --json
 
-# Write behavioral_memory into block.yaml
-aglet stats PaymentAuth --write
-
-# Domain-level rollup (on-the-fly, not stored)
+# Domain-level rollup
 aglet stats --domain intelligence
 
-# Project-wide thermal map — all blocks sorted by warmth
+# Project-wide thermal map
 aglet stats --project
-
-# Project-wide write-back — update all block.yaml files
-aglet stats --project --write
 ```
 
 ### Example output
@@ -415,7 +404,7 @@ aglet validate [--deep] [--unit NAME] [--json]
 | Contract completeness | Surfaces | Every external dependency is in the contract with schema + callers |
 | Logic division | Components | Transformation logic lives in embedded blocks, not inline |
 
-Checks include **contextual notes**: stub detection, warmth/run count from behavioral memory, suspicious patterns (block name contains "and", many downstream calls). Each check lists the exact files the agent should read.
+Checks include **contextual notes**: stub detection, warmth/run count from vitals, suspicious patterns (block name contains "and", many downstream calls). Each check lists the exact files the agent should read.
 
 ### `--deep` flags
 
@@ -434,7 +423,7 @@ Checks include **contextual notes**: stub detection, warmth/run count from behav
 | **Domain references** | Every unit's `domain` field references an existing `domain.yaml` |
 | **Block files** | Valid `runtime` value, `impl` file exists (process/embedded), `schema.in` and `schema.out` present |
 | **Reasoning blocks** | Model resolvable (block or domain default), `prompt.md` exists, tools reference valid blocks, no `main.*` file |
-| **Calls edges** | Every `calls` entry references an existing Block; divergence between declared `tools` and `observed_callees` in behavioral memory |
+| **Calls edges** | Every `calls` entry references an existing Block; divergence between declared `tools` and `observed_callees` in vitals |
 | **Schema compatibility** | For each `calls` edge, every field required by the downstream Block's `schema.in` is present in the upstream Block's `schema.out`, with compatible types |
 | **Circular deps** | No cycles in the calls graph (DFS) |
 | **Surfaces** | Entry file exists, no nested surfaces, contract dependencies reference existing blocks/pipelines |
@@ -531,6 +520,26 @@ _Verify reasoning prompts are comprehensive and handle edge cases._
 
 4 checks across 3 categories
 ```
+
+---
+
+## aglet snapshot
+
+Commit vitals files in all `.aglet/` repos across the project.
+
+```
+aglet snapshot
+```
+
+Each domain's `.aglet/` directory has its own git repository. `aglet snapshot` stages all `vitals.json` files and creates a commit referencing the main repo's current HEAD hash. This creates a correlated behavioral history — you can track how vitals change alongside code changes.
+
+```bash
+aglet snapshot
+# [aglet snapshot] ingest/.aglet/ — committed
+# [aglet snapshot] intelligence/.aglet/ — committed
+```
+
+Use after significant runs, deployments, or before code changes to capture a behavioral checkpoint.
 
 ---
 

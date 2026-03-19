@@ -232,7 +232,7 @@ contract:
 
 The `contract` section is the bridge between frontend and backend. Each dependency maps a name to a Block (or pipeline), with its own input/output schemas, the Components that call it, and when it fires.
 
-`aglet serve` reads this contract and spins up a local HTTP dev server with `POST /contract/<Name>` endpoints, so your frontend can call Blocks without any custom API wiring.
+`aglet listen` reads this contract and spins up a local HTTP dev server with `POST /contract/<Name>` endpoints, so your frontend can call Blocks without any custom API wiring.
 
 ### Detection Rule
 

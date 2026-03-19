@@ -113,7 +113,7 @@ Output:
 {"greeting": "Hello, Aglet!", "length": 5}
 ```
 
-Behind the scenes, the wrapper observed the entire execution: logged `block.start` and `block.complete`, captured duration, checked for code changes, and updated the Block's behavioral memory in `block.yaml`.
+Behind the scenes, the wrapper observed the entire execution: logged `block.start` and `block.complete`, captured duration, checked for code changes, and updated the Block's vitals in `.aglet/`.
 
 ## Create a Second Block and Connect Them
 
@@ -178,7 +178,7 @@ Output:
 {"shout": "HELLO, AGLET!!!!"}
 ```
 
-The pipeline followed the `calls` edge from Greeter to Shouter automatically. Both Blocks were wrapped with full observability — each got their own log entries, behavioral memory updates, and version tracking.
+The pipeline followed the `calls` edge from Greeter to Shouter automatically. Both Blocks were wrapped with full observability — each got their own log entries, vitals updates, and version tracking.
 
 ## See the Behavioral Memory
 
@@ -197,7 +197,7 @@ Block: Greeter
   Last called:  2 minutes ago
 ```
 
-The AML has been silently observing. Every run accumulated knowledge — call counts, timing, error rates, warmth. This data lives in `Greeter/block.yaml` under the `behavioral_memory` section, readable by any agent or tool.
+The AML has been silently observing. Every run accumulated knowledge — call counts, timing, error rates, warmth. This data lives in `.aglet/Greeter/vitals.json`, readable by any agent or tool.
 
 ## Validate the Project
 

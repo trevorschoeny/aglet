@@ -22,7 +22,7 @@ A process Block directory contains:
 - `block.yaml` — Identity, schemas, edges, behavioral policy.
 - `intent.md` — Why this Block exists, design decisions, open questions.
 - `main.*` — Implementation file. Language declared via `impl` in `block.yaml`.
-- `logs.jsonl` — Runtime logs. Auto-generated, never hand-edited.
+- Runtime logs live in `.aglet/{blockName}/logs.jsonl` — separate from source, auto-generated.
 
 ### Reasoning
 
@@ -101,16 +101,14 @@ schema:
 
 ```yaml
 observe:
-  log: ./logs.jsonl
   events: [start, complete, error]
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `observe.log` | No | Path to log file. Default: `./logs.jsonl`. |
 | `observe.events` | No | Which events the wrapper logs. Default: all events. Reasoning blocks should include `tool.call`. |
 
-The observe section is the Block's observability contract. The wrapper reads this and only logs events the Block opts into. Any execution environment that implements the wrapper protocol honors the same declaration. See [Runtime Architecture](/spec/runtime) for how wrappers use this.
+The observe section is the Block's observability contract. The wrapper reads this and only logs events the Block opts into. Logs are written to `.aglet/{blockName}/logs.jsonl` — the path is derived automatically from the domain's `.aglet/` directory. Vitals (compiled metrics) are written to `.aglet/{blockName}/vitals.json` and updated incrementally after every execution. See [Runtime Architecture](/spec/runtime) and [AML](/spec/aml) for details.
 
 ### Behavior Fields
 
@@ -135,7 +133,7 @@ Every process Block follows the same interface regardless of language:
 3. Write JSON to stdout
 4. Exit 0 on success, non-zero on failure
 
-**stdout is for data, stderr is for diagnostics.** Never mix error messages into the stdout JSON stream. The wrapper captures stderr and writes it to `logs.jsonl`.
+**stdout is for data, stderr is for diagnostics.** Never mix error messages into the stdout JSON stream. The wrapper captures stderr and writes it to `.aglet/{blockName}/logs.jsonl`.
 
 The implementation has three labeled sections — **In**, **Transform**, **Out** — clearly marked with comments. The transformation logic lives in a separate function named after the Block.
 
@@ -272,7 +270,6 @@ calls:
   - payments/PaymentGateway
 
 observe:
-  log: ./logs.jsonl
   events: [start, complete, error]
 
 execution: sync
@@ -317,7 +314,6 @@ calls:
   - TensionTracker
 
 observe:
-  log: ./logs.jsonl
   events: [start, complete, error, tool.call]
 ```
 

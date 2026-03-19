@@ -41,15 +41,15 @@ Every block has a wrapper. The wrapper is serverless — it doesn't exist until 
 
 1. Reads `block.yaml` — `observe`, `calls`, `tools`
 2. Pre-warms downstream block wrappers from `calls` (concurrent with step 3)
-3. Logs `block.start` to `{blockDir}/logs.jsonl`
+3. Logs `block.start` to `.aglet/{blockName}/logs.jsonl`
 4. Executes the block implementation
-5. Logs `block.complete` to `{blockDir}/logs.jsonl`
+5. Logs `block.complete` to `.aglet/{blockName}/logs.jsonl`
 6. Forwards output to the relevant downstream block wrappers
 7. Returns the result
 
-The wrapper also captures any log lines written by the block implementation itself (stderr output) and appends them to `logs.jsonl`.
+The wrapper also captures any log lines written by the block implementation itself (stderr output) and appends them to `logs.jsonl`. After execution, it incrementally updates the block's vitals in `.aglet/{blockName}/vitals.json` — call count, running average duration, error rate, warmth.
 
-If the request includes surface context (which surface and component initiated the call), the wrapper writes a `contract.call` entry to the surface's `logs.jsonl`.
+If the request includes surface context (which surface and component initiated the call), the wrapper writes a `contract.call` entry to the surface's `.aglet/{surfaceName}/logs.jsonl`.
 
 ### Block Implementation
 
@@ -114,7 +114,7 @@ X-Aglet-Surface: Dashboard
 X-Aglet-Caller: FeedbackPanel
 ```
 
-The domain listener routes to the block wrapper. The wrapper executes the block, writes to the block's `logs.jsonl` as usual, and also writes a `contract.call` entry to the surface's `logs.jsonl` — including which component made the call, duration, and success/error.
+The domain listener routes to the block wrapper. The wrapper executes the block, writes to the block's `.aglet/` logs as usual, and also writes a `contract.call` entry to the surface's `.aglet/` logs — including which component made the call, duration, and success/error.
 
 The wrapper can do this because the wrapper is the block's network-facing layer. Interacting with other units (including writing to a surface's log) is part of its role.
 
@@ -135,8 +135,7 @@ Blocks can declare what observability they want in `block.yaml`:
 
 ```yaml
 observe:
-  log: ./logs.jsonl
   events: [start, complete, error, tool.call]
 ```
 
-The wrapper reads this declaration and logs the specified events. Any execution environment that implements the Aglet wrapper protocol — the CLI, a Docker container, a WASM host, a serverless adapter — reads the same declaration and produces the same logs.
+The wrapper reads this declaration and logs the specified events to `.aglet/{blockName}/logs.jsonl`. The log path is derived from the domain's `.aglet/` directory — not declared in the observe config. Any execution environment that implements the Aglet wrapper protocol reads the same declaration and produces the same logs.

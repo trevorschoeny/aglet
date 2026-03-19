@@ -24,14 +24,15 @@ An Aglet project is self-describing. Here's what each file gives your agent:
 
 | File | What it reveals |
 |------|----------------|
-| `block.yaml` | Identity, schemas (input/output contracts), runtime type, edges to other Blocks, observability contract, behavioral memory |
+| `block.yaml` | Identity, schemas (input/output contracts), runtime type, edges to other Blocks, observability contract |
 | `intent.md` | Why this unit exists, design decisions, open questions — context for making good modification decisions |
 | `calls` edges | Data flow graph — which Blocks feed into which, where pipelines start and end |
-| `behavioral_memory` | Operational reality — warmth, error rate, call frequency, observed dependencies, token usage |
+| `.aglet/{blockName}/vitals.json` | Operational reality — warmth, error rate, call frequency, observed dependencies, token usage |
+| `.aglet/{blockName}/logs.jsonl` | Raw execution events — every call, every error, every tool invocation |
 | `surface.yaml` | Frontend contract — which backend Blocks the Surface depends on, which Components call which contracts |
 | `component.yaml` | What contract dependencies this Component consumes — bidirectional traceability with the Surface contract |
 
-The behavioral memory section is especially valuable. An agent can see that a Block is hot (actively used, changes carry risk), cold (dormant, safe to refactor), has a high error rate (needs investigation), or uses tools it never declared (design drift). See the [AML specification](/spec/aml) for full details.
+Vitals are especially valuable. An agent can see that a Block is hot (actively used, changes carry risk), cold (dormant, safe to refactor), has a high error rate (needs investigation), or uses tools it never declared (design drift). Vitals live in `.aglet/` — a separate runtime data directory at each domain level with its own git history. See the [AML specification](/spec/aml) for full details.
 
 ## Agent Workflows
 
@@ -61,7 +62,7 @@ Categories: intent accuracy, schema correctness, prompt quality (reasoning Block
 aglet stats BlockName --json
 ```
 
-Before modifying a high-traffic Block, inspect its behavioral memory. This gives your agent the full operational picture — warmth, error rate, observed dependencies, token usage — so it can calibrate how careful to be.
+Before modifying a high-traffic Block, inspect its vitals. This gives your agent the full operational picture — warmth, error rate, observed dependencies, token usage — so it can calibrate how careful to be. Vitals update incrementally after every execution, so they're always current.
 
 ## The Philosophy
 
@@ -69,4 +70,4 @@ Aglet doesn't build agents. It makes projects legible to any agent.
 
 Most codebases require archaeology — reading implementation code, inferring intent, guessing at data flow. Aglet inverts this: the codebase speaks for itself through structured metadata, typed schemas, and accumulated behavioral knowledge. Your agent already knows how to read YAML and follow references. Aglet gives it the structured data to work with.
 
-For the full picture of how execution, observation, and behavioral memory connect, see [How It Works](/guide/how-it-works).
+For the full picture of how execution, observation, and vitals connect, see [How It Works](/guide/how-it-works).

@@ -160,7 +160,7 @@ In production, the contract tells whatever infrastructure adapter you use how to
 
 ## Observability
 
-Surfaces have their own `logs.jsonl` in the surface directory. This file captures two kinds of events:
+Surfaces have their own `logs.jsonl` in `.aglet/{surfaceName}/logs.jsonl`. This file captures two kinds of events:
 
 **Contract call events** — written by block wrappers. When a component calls a block through a contract endpoint, the block wrapper writes a `contract.call` entry to the surface's log with the component name, duration, and success/error. This is automatic — it happens server-side whenever the request includes the right headers.
 
@@ -212,7 +212,7 @@ X-Aglet-Caller: FeedbackPanel
 X-Aglet-Surface: Dashboard
 ```
 
-The domain listener routes to the block wrapper. The wrapper executes the block, logs to the block's `logs.jsonl`, and writes a `contract.call` entry to the surface's `logs.jsonl`:
+The domain listener routes to the block wrapper. The wrapper executes the block, logs to the block's `.aglet/` logs, and writes a `contract.call` entry to the surface's `.aglet/` logs:
 
 ```jsonl
 {"event":"contract.call","contract":"Sentiment","block":"SentimentAnalyzer","caller":"FeedbackPanel","surface":"Dashboard","duration_ms":42,"success":true,"ts":"2026-03-17T21:09:00Z"}

@@ -119,6 +119,45 @@ Peers are explicit and declared -- no service discovery, no magic. The routing t
 
 In dev, peers point to localhost ports. In prod, they point to deployed URLs. The block code never changes.
 
+### Aglet Config
+
+```yaml
+aglet:
+  sink: local
+```
+
+Runtime data configuration for the domain. Currently supports `sink` -- where logs and vitals are forwarded.
+
+| Value | Description |
+|-------|-------------|
+| `local` | Default. Runtime data stays in `.aglet/` only. |
+| A URL | After local write, log entries are forwarded to this endpoint in a fire-and-forget goroutine. |
+
+Blocks can override the domain sink with a `sink` field in their own `block.yaml`. Resolution walks the chain: block → nearest domain → parent domain → root domain.
+
+### .aglet/ Directory
+
+Every domain has a `.aglet/` directory that stores runtime data -- logs and vitals -- separate from source code. It has its own git repository for versioned behavioral history.
+
+```
+ingest/                          # domain
+  .aglet/                        # runtime data (own git repo)
+    .git/
+    .gitignore                   # ignores **/logs.jsonl
+    ParseURL/
+      logs.jsonl                 # raw events (not committed)
+      vitals.json                # compiled vitals (committed)
+    WordCount/
+      logs.jsonl
+      vitals.json
+  ParseURL/                      # block source (main repo)
+    block.yaml
+    intent.md
+    main.py
+```
+
+Created automatically by `aglet init` and `aglet new domain`. `aglet snapshot` commits vitals files in all `.aglet/` repos.
+
 ## The Root Domain
 
 The root domain is the project itself. Its `domain.yaml` defines project-wide settings, and its `intent.md` is the founding document that every Block, Surface, and domain exists in service of.
@@ -161,6 +200,9 @@ listen: true
 # peers:
 #   payments: "https://payments.myapp.com"
 #   auth: "http://localhost:8081"
+
+aglet:
+  sink: local
 ```
 
 ### Sub-domain Example
