@@ -1,5 +1,12 @@
 package main
 
+import "gopkg.in/yaml.v3"
+
+// yamlMarshal and yamlUnmarshal are thin wrappers so the custom
+// UnmarshalYAML on SurfaceContract can re-parse individual entries.
+var yamlMarshal = yaml.Marshal
+var yamlUnmarshal = yaml.Unmarshal
+
 // BlockYaml represents the parsed block.yaml for a Block.
 type BlockYaml struct {
 	ID          string   `yaml:"id"`
@@ -116,9 +123,79 @@ type SurfaceYaml struct {
 }
 
 // SurfaceContract holds the contract section of surface.yaml.
+// Supports both flat format (entries directly under contract:) and
+// nested format (entries under contract.dependencies:). The flat format
+// is the canonical spec format. The nested format is supported for
+// backward compatibility.
 type SurfaceContract struct {
-	Dependencies map[string]ContractDependency `yaml:"dependencies"`
-	Events       map[string]interface{}        `yaml:"events"`
+	Dependencies map[string]ContractDependency `yaml:"-"`
+	Events       map[string]interface{}        `yaml:"-"`
+}
+
+// UnmarshalYAML implements custom parsing for SurfaceContract.
+// It handles both flat and nested formats:
+//
+// Flat (spec format):
+//
+//	contract:
+//	  AddReading:
+//	    block: SomeBlock
+//	  events:
+//	    ...
+//
+// Nested (legacy format):
+//
+//	contract:
+//	  dependencies:
+//	    AddReading:
+//	      block: SomeBlock
+//	  events:
+//	    ...
+func (sc *SurfaceContract) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First, try to detect which format by unmarshaling into a raw map
+	var raw map[string]interface{}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	// If the map has a "dependencies" key, use nested format
+	if _, hasDeps := raw["dependencies"]; hasDeps {
+		// Re-unmarshal into the nested struct
+		var nested struct {
+			Dependencies map[string]ContractDependency `yaml:"dependencies"`
+			Events       map[string]interface{}        `yaml:"events"`
+		}
+		if err := unmarshal(&nested); err != nil {
+			return err
+		}
+		sc.Dependencies = nested.Dependencies
+		sc.Events = nested.Events
+		return nil
+	}
+
+	// Flat format: every key except "events" is a dependency.
+	// We need to re-unmarshal each entry as a ContractDependency.
+	sc.Dependencies = make(map[string]ContractDependency)
+	for key, val := range raw {
+		if key == "events" {
+			// Parse events separately
+			if evMap, ok := val.(map[string]interface{}); ok {
+				sc.Events = evMap
+			}
+			continue
+		}
+		// Marshal and re-unmarshal each entry to get a typed ContractDependency
+		depBytes, err := yamlMarshal(val)
+		if err != nil {
+			continue
+		}
+		var dep ContractDependency
+		if err := yamlUnmarshal(depBytes, &dep); err != nil {
+			continue
+		}
+		sc.Dependencies[key] = dep
+	}
+	return nil
 }
 
 // ContractDependency represents a dependency in the Surface contract.
