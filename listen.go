@@ -133,7 +133,13 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 			depName := depName
 			dep := dep
 
+			// Resolve the block name: prefer block field, fall back to pipeline
+			// field (which names the first block in a pipeline chain), then the
+			// contract dependency name itself.
 			blockName := dep.Block
+			if blockName == "" {
+				blockName = dep.Pipeline
+			}
 			if blockName == "" {
 				blockName = depName
 			}
