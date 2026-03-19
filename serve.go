@@ -287,6 +287,47 @@ func parseSurfaceContract(path string) (map[string]ContractDependency, error) {
 	return surface.Contract.Dependencies, nil
 }
 
+// handleSurfaceStore provides a simple JSON key-value store for surface data.
+// GET returns the stored JSON. POST replaces it. The data file lives in the
+// surface's .aglet/ directory as store.json. This is a development convenience,
+// not a production database.
+func handleSurfaceStore(w http.ResponseWriter, r *http.Request, agletSurfaceDir string) {
+	storePath := filepath.Join(agletSurfaceDir, "store.json")
+	EnsureAgletDir(agletSurfaceDir)
+
+	switch r.Method {
+	case http.MethodGet:
+		data, err := os.ReadFile(storePath)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+
+	case http.MethodPost:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+		if err := os.WriteFile(storePath, body, 0644); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		http.Error(w, `{"error":"GET or POST required"}`, http.StatusMethodNotAllowed)
+	}
+}
+
 // handleInteractionEvents receives batched client-side interaction events from
 // the @aglet/sdk and appends them to the surface's logs.jsonl. The SDK buffers
 // events in the browser and flushes them periodically (every 5 min by default)

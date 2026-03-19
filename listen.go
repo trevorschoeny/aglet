@@ -162,6 +162,11 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 		mux.HandleFunc("/_aglet/events", func(w http.ResponseWriter, r *http.Request) {
 			handleInteractionEvents(w, r, agletSurfaceDir)
 		})
+
+		// Simple JSON store for surface data persistence
+		mux.HandleFunc("/_aglet/store", func(w http.ResponseWriter, r *http.Request) {
+			handleSurfaceStore(w, r, agletSurfaceDir)
+		})
 	}
 
 	// Health check endpoint
