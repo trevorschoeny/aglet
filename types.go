@@ -28,7 +28,7 @@ type BlockYaml struct {
 	Execution          string            `yaml:"execution"`
 	Error              string            `yaml:"error"`
 	Observe            *ObserveConfig    `yaml:"observe,omitempty"`  // Observability contract: which events to log
-	BehavioralMemory   *BehavioralMemory `yaml:"behavioral_memory,omitempty"` // Written by aglet stats --write
+	Sink               string            `yaml:"sink,omitempty"`     // Override domain-level sink for this block
 }
 
 // DomainYaml represents the parsed domain.yaml.
@@ -42,6 +42,12 @@ type DomainYaml struct {
 	Defaults    DomainDefaults            `yaml:"defaults"`
 	Listen      bool                      `yaml:"listen"`          // Opt-in: this domain can be deployed as a listener
 	Peers       map[string]string         `yaml:"peers,omitempty"` // Cross-domain routing: domain name → URL
+	Aglet       AgletConfig               `yaml:"aglet,omitempty"` // Runtime data config (sink, etc.)
+}
+
+// AgletConfig holds runtime data configuration for a domain.
+type AgletConfig struct {
+	Sink string `yaml:"sink,omitempty"` // "local" (default) or a URL for remote forwarding
 }
 
 // ProviderConfig holds LLM provider connection details.
@@ -67,9 +73,9 @@ type ObserveConfig struct {
 }
 
 // BehavioralMemory holds the AML-computed behavioral profile of a Block.
-// This section is authored and maintained solely by `aglet stats --write`.
-// It lives in block.yaml alongside developer-declared fields, forming the
-// complete Semantic Overlay: declared meaning + learned behavior.
+// Lives in .aglet/{blockName}/memory.json — separate from source code.
+// Written automatically by the wrapper after every execution and by `aglet stats`.
+// Together with the declared layer (block.yaml), it forms the Semantic Overlay.
 type BehavioralMemory struct {
 	TotalCalls      int            `yaml:"total_calls" json:"total_calls"`
 	AvgRuntimeMs    float64        `yaml:"avg_runtime_ms" json:"avg_runtime_ms"`
@@ -86,8 +92,10 @@ type BehavioralMemory struct {
 
 // DiscoveredBlock holds a parsed Block and its filesystem location.
 type DiscoveredBlock struct {
-	Config BlockYaml
-	Dir    string // Absolute path to the Block directory
+	Config           BlockYaml
+	Dir              string            // Absolute path to the Block directory
+	AgletDir         string            // Absolute path to .aglet/{blockName}/ for this block's runtime data
+	BehavioralMemory *BehavioralMemory // Loaded from .aglet/{blockName}/memory.json (nil if no memory yet)
 }
 
 // ExecutionResult carries everything the executor produces back to the wrapper.

@@ -107,7 +107,7 @@ func generateDeepChecklist(inv *ProjectInventory, projectRoot string, unitFilter
 
 	// Helper: build warmth notes for a block
 	warmthNotes := func(block *DiscoveredBlock) []string {
-		mem := block.Config.BehavioralMemory
+		mem := block.BehavioralMemory
 		if mem == nil {
 			return []string{"no runtime data — block has never been run; checks are speculative"}
 		}
@@ -227,7 +227,7 @@ func generateDeepChecklist(inv *ProjectInventory, projectRoot string, unitFilter
 				})
 			} else {
 				notes := warmthNotes(b)
-				if b.Config.BehavioralMemory == nil || b.Config.BehavioralMemory.TotalCalls == 0 {
+				if b.BehavioralMemory == nil || b.BehavioralMemory.TotalCalls == 0 {
 					notes = append(notes, "prompt has never been run — verify reasoning framework is sound before relying on it")
 				}
 				checks = append(checks, DeepCheck{

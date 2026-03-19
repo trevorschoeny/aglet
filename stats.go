@@ -355,7 +355,7 @@ func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBloc
 	// --- Step 2: Determine accumulation mode ---
 	// If there's existing behavioral_memory and no code change since last stats run → incremental.
 	// Otherwise → reset from zero (or from the resetTime forward).
-	existing := block.Config.BehavioralMemory
+	existing := block.BehavioralMemory
 	var windowStart time.Time // zero = process all entries
 	doReset := true
 	if existing != nil && existing.LastUpdated != "" {
