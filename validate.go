@@ -125,6 +125,7 @@ func discoverProject(projectRoot string) (*ProjectInventory, []ValidationError) 
 		"dist":         true,
 		"build":        true,
 		"__pycache__":  true,
+		".aglet":       true,
 	}
 
 	filepath.Walk(projectRoot, func(path string, info os.FileInfo, err error) error {
@@ -153,6 +154,7 @@ func discoverProject(projectRoot string) (*ProjectInventory, []ValidationError) 
 					Message: fmt.Sprintf("failed to parse block.yaml: %s", parseErr),
 				})
 			} else {
+				LoadBlockRuntime(block, projectRoot)
 				inv.Blocks = append(inv.Blocks, block)
 			}
 		}

@@ -320,8 +320,14 @@ func printProjectStats(results []blockStatRow) {
 // skip this (e.g., the auto-update path in dispatchBlock, where per-run cross-scans
 // would be too expensive).
 func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBlock) *BehavioralMemory {
-	logPath := filepath.Join(block.Dir, "logs.jsonl")
+	// Read logs from .aglet/ path, fall back to old block directory for migration
+	logPath := filepath.Join(block.AgletDir, "logs.jsonl")
 	rawData, err := os.ReadFile(logPath)
+	if err != nil {
+		// Try legacy path (block directory)
+		logPath = filepath.Join(block.Dir, "logs.jsonl")
+		rawData, err = os.ReadFile(logPath)
+	}
 	if err != nil {
 		// No logs yet — block exists but has never been run
 		return &BehavioralMemory{
@@ -512,7 +518,12 @@ func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBloc
 			if other.Dir == block.Dir {
 				continue
 			}
-			callerLogData, readErr := os.ReadFile(filepath.Join(other.Dir, "logs.jsonl"))
+			// Read from .aglet/ path, fall back to old block directory
+			callerLogPath := filepath.Join(other.AgletDir, "logs.jsonl")
+			callerLogData, readErr := os.ReadFile(callerLogPath)
+			if readErr != nil {
+				callerLogData, readErr = os.ReadFile(filepath.Join(other.Dir, "logs.jsonl"))
+			}
 			if readErr != nil {
 				continue
 			}
@@ -656,79 +667,25 @@ func formatToolMap(m map[string]int) string {
 // writeBehavioralMemory writes the behavioral_memory section into a Block's block.yaml.
 // It replaces any existing behavioral_memory section, or appends one if absent.
 // All developer-declared fields above the section are preserved exactly.
+// writeBehavioralMemory writes the behavioral profile to .aglet/{blockName}/memory.json.
+// This is the only write path for behavioral memory — block.yaml is never touched.
 func writeBehavioralMemory(block *DiscoveredBlock, mem *BehavioralMemory) error {
-	blockYamlPath := filepath.Join(block.Dir, "block.yaml")
+	if block.AgletDir == "" {
+		return fmt.Errorf("AgletDir not set for block '%s'", block.Config.Name)
+	}
 
-	existing, err := os.ReadFile(blockYamlPath)
+	EnsureAgletDir(block.AgletDir)
+
+	memPath := filepath.Join(block.AgletDir, "memory.json")
+	data, err := json.MarshalIndent(mem, "", "  ")
 	if err != nil {
-		return fmt.Errorf("could not read block.yaml: %w", err)
+		return fmt.Errorf("could not marshal behavioral memory: %w", err)
 	}
 
-	// Strip any existing AML section so we can replace it cleanly
-	stripped := stripBehavioralMemorySection(string(existing))
-	section := buildBehavioralMemoryYAML(mem)
+	// Also update the in-memory reference
+	block.BehavioralMemory = mem
 
-	newContent := strings.TrimRight(stripped, "\n") + "\n\n" + section + "\n"
-
-	return os.WriteFile(blockYamlPath, []byte(newContent), 0644)
-}
-
-// stripBehavioralMemorySection removes the AML comment and behavioral_memory
-// block from a block.yaml string. Returns everything before that section.
-func stripBehavioralMemorySection(content string) string {
-	markers := []string{"\n# AML —", "\nbehavioral_memory:"}
-	for _, marker := range markers {
-		if idx := strings.Index(content, marker); idx != -1 {
-			return content[:idx]
-		}
-	}
-	return content
-}
-
-// buildBehavioralMemoryYAML produces the YAML string for the behavioral_memory
-// section. Uses explicit string building to preserve field order and the comment.
-func buildBehavioralMemoryYAML(mem *BehavioralMemory) string {
-	var sb strings.Builder
-	sb.WriteString("# AML — written by `aglet stats --write`, do not edit manually\n")
-	sb.WriteString("behavioral_memory:\n")
-	sb.WriteString(fmt.Sprintf("  total_calls: %d\n", mem.TotalCalls))
-	sb.WriteString(fmt.Sprintf("  avg_runtime_ms: %.1f\n", mem.AvgRuntimeMs))
-	sb.WriteString(fmt.Sprintf("  error_rate: %.4f\n", mem.ErrorRate))
-	sb.WriteString(fmt.Sprintf("  warmth_score: %.2f\n", mem.WarmthScore))
-	sb.WriteString(fmt.Sprintf("  warmth_level: %s\n", mem.WarmthLevel))
-	if mem.LastCalled != "" {
-		sb.WriteString(fmt.Sprintf("  last_called: \"%s\"\n", mem.LastCalled))
-	}
-	if mem.VersionSince != "" {
-		sb.WriteString(fmt.Sprintf("  version_since: \"%s\"\n", mem.VersionSince))
-	}
-	if mem.TokenAvg > 0 {
-		sb.WriteString(fmt.Sprintf("  token_avg: %d\n", mem.TokenAvg))
-	}
-	if len(mem.ObservedCallees) > 0 {
-		sb.WriteString("  observed_callees:\n")
-		keys := make([]string, 0, len(mem.ObservedCallees))
-		for k := range mem.ObservedCallees {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			sb.WriteString(fmt.Sprintf("    %s: %d\n", k, mem.ObservedCallees[k]))
-		}
-	}
-	if len(mem.ObservedCallers) > 0 {
-		sb.WriteString("  observed_callers:\n")
-		keys := make([]string, 0, len(mem.ObservedCallers))
-		for k := range mem.ObservedCallers {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			sb.WriteString(fmt.Sprintf("    %s: %d\n", k, mem.ObservedCallers[k]))
-		}
-	}
-	sb.WriteString(fmt.Sprintf("  last_updated: \"%s\"\n", mem.LastUpdated))
-	return sb.String()
+	return os.WriteFile(memPath, data, 0644)
 }
 
 // formatTokens formats a token count as a human-readable string (1.2M, 800K, etc.)
