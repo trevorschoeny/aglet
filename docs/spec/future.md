@@ -173,14 +173,3 @@ Domain listeners deployable as production services — same binary as dev, with 
 
 Automatic peer discovery between domains using DNS or a lightweight registry, replacing manual `peers:` configuration. Domains announce themselves and discover neighbors without hardcoded URLs.
 
-## Pipeline Error Recovery
-
-When a block in a pipeline fails, the pipeline should be able to resume from the failed block rather than restarting from scratch. The pipeline state (which blocks completed, what output they produced) would be checkpointed in `.aglet/`, allowing recovery after transient failures.
-
-## Block Versioning & Rollback
-
-Behavioral vitals tied to specific implementation versions. When a new version degrades performance (higher error rate, slower runtime), the system could flag the regression and optionally roll back to the previous implementation. The `.aglet/` git history already tracks behavioral snapshots per commit — this extends that into active version management.
-
-## Observability Alerting
-
-Threshold-based alerts on vitals. "If ParseURL error rate exceeds 5%, notify." Configured in the observe contract or domain config, delivered via the sink (AMS, webhook, email). The wrapper already computes vitals incrementally — adding threshold checks is a small step.
