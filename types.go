@@ -123,62 +123,30 @@ type SurfaceYaml struct {
 }
 
 // SurfaceContract holds the contract section of surface.yaml.
-// Supports both flat format (entries directly under contract:) and
-// nested format (entries under contract.dependencies:). The flat format
-// is the canonical spec format. The nested format is supported for
-// backward compatibility.
+// Contract entries are declared directly under contract: in flat format.
+// Each key (except "events") is a contract dependency name.
+//
+//	contract:
+//	  AddReading:
+//	    block: SomeBlock
+//	    callers: [AddURL]
 type SurfaceContract struct {
 	Dependencies map[string]ContractDependency `yaml:"-"`
 	Events       map[string]interface{}        `yaml:"-"`
 }
 
 // UnmarshalYAML implements custom parsing for SurfaceContract.
-// It handles both flat and nested formats:
-//
-// Flat (spec format):
-//
-//	contract:
-//	  AddReading:
-//	    block: SomeBlock
-//	  events:
-//	    ...
-//
-// Nested (legacy format):
-//
-//	contract:
-//	  dependencies:
-//	    AddReading:
-//	      block: SomeBlock
-//	  events:
-//	    ...
+// Each key under contract: is a dependency name, except "events"
+// which is reserved for event configuration.
 func (sc *SurfaceContract) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// First, try to detect which format by unmarshaling into a raw map
 	var raw map[string]interface{}
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
 
-	// If the map has a "dependencies" key, use nested format
-	if _, hasDeps := raw["dependencies"]; hasDeps {
-		// Re-unmarshal into the nested struct
-		var nested struct {
-			Dependencies map[string]ContractDependency `yaml:"dependencies"`
-			Events       map[string]interface{}        `yaml:"events"`
-		}
-		if err := unmarshal(&nested); err != nil {
-			return err
-		}
-		sc.Dependencies = nested.Dependencies
-		sc.Events = nested.Events
-		return nil
-	}
-
-	// Flat format: every key except "events" is a dependency.
-	// We need to re-unmarshal each entry as a ContractDependency.
 	sc.Dependencies = make(map[string]ContractDependency)
 	for key, val := range raw {
 		if key == "events" {
-			// Parse events separately
 			if evMap, ok := val.(map[string]interface{}); ok {
 				sc.Events = evMap
 			}
