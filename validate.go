@@ -655,7 +655,7 @@ func checkCallsEdges(inv *ProjectInventory) []ValidationError {
 		// observed_callees is built from tool.call log events, which only occur in
 		// reasoning blocks. Divergence = signal that design and runtime have drifted.
 		// Not auto-fixable — requires a human design decision.
-		mem := b.BehavioralMemory
+		mem := b.Vitals
 		if mem == nil || len(mem.ObservedCallees) == 0 {
 			continue
 		}

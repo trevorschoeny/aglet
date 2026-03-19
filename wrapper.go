@@ -14,7 +14,7 @@ import (
 
 // WrapBlock is the observability shell for block execution.
 // It handles: version change detection, logging start/complete/error,
-// stderr capture, behavioral memory updates, and calls forwarding.
+// stderr capture, vitals updates, and calls forwarding.
 // The actual execution is delegated to the executor (ExecuteProcessBlock,
 // ExecuteReasoningBlock), which returns a pure ExecutionResult with no
 // side effects on logs.
@@ -148,6 +148,9 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 			logContractCall(opts.SurfaceContext, block.Config.Name, durationMs, false, result.Error.Error())
 		}
 
+		// Increment vitals even on error — errors are important behavioral data
+		_ = incrementVitals(block, durationMs, true, result.Meta)
+
 		return nil, result.Error
 	}
 
@@ -164,11 +167,10 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 		logContractCall(opts.SurfaceContext, block.Config.Name, durationMs, true, "")
 	}
 
-	// --- Step 9: Update behavioral memory (best-effort) ---
-	// After a successful run, recompute and write behavioral_memory to
-	// block.yaml. This is the AML passively observing. Pass nil for
-	// allBlocks: the observed_callers cross-scan is too expensive per-run.
-	_ = writeBehavioralMemory(block, computeBehavioralMemory(block, nil))
+	// --- Step 9: Update vitals incrementally (best-effort) ---
+	// Instead of re-scanning logs, the wrapper knows exactly what just happened
+	// and can increment the vitals counters directly. This is O(1) — no log reads.
+	_ = incrementVitals(block, durationMs, false, result.Meta)
 
 	// --- Step 10: Forward output to downstream blocks via `calls` ---
 	// If this block declares calls edges, forward the output to each

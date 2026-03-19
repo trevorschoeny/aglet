@@ -72,11 +72,11 @@ type ObserveConfig struct {
 	Events []string `yaml:"events"` // Which events to log: start, complete, error, tool.call
 }
 
-// BehavioralMemory holds the AML-computed behavioral profile of a Block.
-// Lives in .aglet/{blockName}/memory.json — separate from source code.
+// Vitals holds the AML-computed vitals of a Block.
+// Lives in .aglet/{blockName}/vitals.json — separate from source code.
 // Written automatically by the wrapper after every execution and by `aglet stats`.
 // Together with the declared layer (block.yaml), it forms the Semantic Overlay.
-type BehavioralMemory struct {
+type Vitals struct {
 	TotalCalls      int            `yaml:"total_calls" json:"total_calls"`
 	AvgRuntimeMs    float64        `yaml:"avg_runtime_ms" json:"avg_runtime_ms"`
 	ErrorRate       float64        `yaml:"error_rate" json:"error_rate"`
@@ -95,7 +95,7 @@ type DiscoveredBlock struct {
 	Config           BlockYaml
 	Dir              string            // Absolute path to the Block directory
 	AgletDir         string            // Absolute path to .aglet/{blockName}/ for this block's runtime data
-	BehavioralMemory *BehavioralMemory // Loaded from .aglet/{blockName}/memory.json (nil if no memory yet)
+	Vitals *Vitals // Loaded from .aglet/{blockName}/vitals.json (nil if no memory yet)
 }
 
 // ExecutionResult carries everything the executor produces back to the wrapper.

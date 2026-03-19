@@ -19,9 +19,9 @@ func InitAgletRepo(domainDir string) error {
 		return fmt.Errorf("could not create .aglet/: %w", err)
 	}
 
-	// Write .gitignore — logs are working data, only memory.json is committed
+	// Write .gitignore — logs are working data, only vitals.json is committed
 	gitignorePath := filepath.Join(agletDir, ".gitignore")
-	gitignoreContent := "# Aglet runtime data — only memory.json files are committed\n**/logs.jsonl\n"
+	gitignoreContent := "# Aglet runtime data — only vitals.json files are committed\n**/logs.jsonl\n"
 	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("could not write .aglet/.gitignore: %w", err)
 	}
@@ -50,7 +50,7 @@ func InitAgletRepo(domainDir string) error {
 	return nil
 }
 
-// SnapshotAgletRepo commits all memory.json files in the .aglet/ repo,
+// SnapshotAgletRepo commits all vitals.json files in the .aglet/ repo,
 // referencing the main repo's current HEAD commit for correlation.
 func SnapshotAgletRepo(domainDir string) error {
 	agletDir := filepath.Join(domainDir, ".aglet")
@@ -68,7 +68,7 @@ func SnapshotAgletRepo(domainDir string) error {
 	// Get main repo HEAD for the commit message
 	mainHead := getMainRepoHead(domainDir)
 
-	// Stage all memory.json files
+	// Stage all vitals.json files
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = agletDir
 	if err := addCmd.Run(); err != nil {

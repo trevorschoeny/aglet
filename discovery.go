@@ -77,7 +77,7 @@ func FindBlock(projectRoot, name string) (*DiscoveredBlock, error) {
 		found.Config.Runtime = "process"
 	}
 
-	// Load runtime data (.aglet/ path + behavioral memory)
+	// Load runtime data (.aglet/ path + vitals)
 	LoadBlockRuntime(found, projectRoot)
 
 	return found, nil
@@ -127,23 +127,23 @@ func ParseDomainYaml(path string) (*DomainYaml, error) {
 // memory for a discovered block. This is a post-discovery step — called after
 // ParseBlockDir or FindBlock to attach runtime data to the block.
 //
-// Falls back to reading behavioral_memory from block.yaml for migration
+// Falls back to reading vitals from block.yaml for migration
 // compatibility with pre-.aglet/ projects.
 func LoadBlockRuntime(block *DiscoveredBlock, projectRoot string) {
 	// Resolve .aglet/ path
 	block.AgletDir = ResolveAgletDirForBlock(block.Dir, block.Config.Name, projectRoot)
 
-	// Try to load memory from .aglet/{blockName}/memory.json
-	memPath := filepath.Join(block.AgletDir, "memory.json")
+	// Try to load memory from .aglet/{blockName}/vitals.json
+	memPath := filepath.Join(block.AgletDir, "vitals.json")
 	if data, err := os.ReadFile(memPath); err == nil {
-		var mem BehavioralMemory
+		var mem Vitals
 		if json.Unmarshal(data, &mem) == nil {
-			block.BehavioralMemory = &mem
+			block.Vitals = &mem
 			return
 		}
 	}
 
-	// No memory.json found — block hasn't been run yet (or pre-migration project)
+	// No vitals.json found — block hasn't been run yet (or pre-migration project)
 }
 
 // ResolveModel determines the LLM model for a reasoning Block by checking

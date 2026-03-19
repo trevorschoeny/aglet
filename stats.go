@@ -13,7 +13,7 @@ import (
 
 // handleStats is the CLI handler for `aglet stats [BlockName] [flags]`.
 // This is the AML's interface in the CLI — it reads logs.jsonl, distills
-// behavioral memory, and optionally writes it back into block.yaml.
+// vitals, and optionally writes it back into block.yaml.
 //
 // The AML's "continuity" in a CLI context isn't a persistent daemon —
 // it's the act of distillation itself. Logs are raw experience; stats
@@ -74,7 +74,7 @@ func handleStats() {
 
 	// Discover all blocks so observed_callers can be cross-scanned
 	inv, _ := discoverProject(projectRoot)
-	mem := computeBehavioralMemory(block, inv.Blocks)
+	mem := computeVitals(block, inv.Blocks)
 
 	if jsonOutput {
 		data, _ := json.MarshalIndent(mem, "", "  ")
@@ -84,20 +84,20 @@ func handleStats() {
 	}
 
 	if writeBack {
-		if err := writeBehavioralMemory(block, mem); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing behavioral_memory: %s\n", err)
+		if err := writeVitals(block, mem); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing vitals: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "[aglet stats] behavioral_memory written to %s/block.yaml\n", block.Config.Name)
+		fmt.Fprintf(os.Stderr, "[aglet stats] vitals written to %s/block.yaml\n", block.Config.Name)
 	}
 }
 
-// blockStatRow pairs a discovered block with its computed behavioral memory.
+// blockStatRow pairs a discovered block with its computed vitals.
 // Used for sorting and rendering the project-wide thermal map.
 type blockStatRow struct {
 	block *DiscoveredBlock
 	name  string
-	mem   *BehavioralMemory
+	mem   *Vitals
 }
 
 // runStatsProject scans all Blocks in the project, computes behavioral
@@ -109,7 +109,7 @@ func runStatsProject(projectRoot string, jsonOutput bool, writeBack bool) {
 	var results []blockStatRow
 	for _, block := range inv.Blocks {
 		// Pass all blocks so observed_callers can be cross-scanned
-		mem := computeBehavioralMemory(block, inv.Blocks)
+		mem := computeVitals(block, inv.Blocks)
 		results = append(results, blockStatRow{block, block.Config.Name, mem})
 	}
 
@@ -131,11 +131,11 @@ func runStatsProject(projectRoot string, jsonOutput bool, writeBack bool) {
 
 	if writeBack {
 		for _, r := range results {
-			if err := writeBehavioralMemory(r.block, r.mem); err != nil {
+			if err := writeVitals(r.block, r.mem); err != nil {
 				fmt.Fprintf(os.Stderr, "[aglet stats] warning: could not write %s: %s\n", r.name, err)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "[aglet stats] behavioral_memory written to %d block.yaml files\n", len(results))
+		fmt.Fprintf(os.Stderr, "[aglet stats] vitals written to %d block.yaml files\n", len(results))
 	}
 }
 
@@ -157,11 +157,11 @@ func runStatsDomain(projectRoot, domainName string, jsonOutput bool, writeBack b
 		os.Exit(1)
 	}
 
-	// Compute behavioral memory for each block in the domain.
+	// Compute vitals for each block in the domain.
 	// Skip observed_callers cross-scan (pass nil) — domain rollup doesn't need per-block caller graphs.
 	type blockResult struct {
 		block *DiscoveredBlock
-		mem   *BehavioralMemory
+		mem   *Vitals
 	}
 	var results []blockResult
 	var totalCalls int
@@ -176,7 +176,7 @@ func runStatsDomain(projectRoot, domainName string, jsonOutput bool, writeBack b
 	minWarmthName := ""
 
 	for _, block := range domainBlocks {
-		mem := computeBehavioralMemory(block, nil)
+		mem := computeVitals(block, nil)
 		results = append(results, blockResult{block, mem})
 
 		totalCalls += mem.TotalCalls
@@ -265,11 +265,11 @@ func runStatsDomain(projectRoot, domainName string, jsonOutput bool, writeBack b
 
 	if writeBack {
 		for _, r := range results {
-			if err := writeBehavioralMemory(r.block, r.mem); err != nil {
+			if err := writeVitals(r.block, r.mem); err != nil {
 				fmt.Fprintf(os.Stderr, "[aglet stats] warning: could not write %s: %s\n", r.block.Config.Name, err)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "[aglet stats] behavioral_memory written to %d block.yaml files\n", len(results))
+		fmt.Fprintf(os.Stderr, "[aglet stats] vitals written to %d block.yaml files\n", len(results))
 	}
 }
 
@@ -303,15 +303,15 @@ func printProjectStats(results []blockStatRow) {
 	}
 }
 
-// computeBehavioralMemory reads a Block's logs.jsonl and distills behavioral memory.
+// computeVitals reads a Block's logs.jsonl and distills vitals.
 //
 // Accumulation model: checkpoint + delta. Rather than rereading the entire log
-// on every call, it uses the last_updated timestamp in the existing behavioral_memory
+// on every call, it uses the last_updated timestamp in the existing vitals
 // as a checkpoint and processes only new entries. This keeps stats fast even for
 // blocks with large log histories.
 //
 // Reset logic: if a block.updated event (impl file changed) is newer than the
-// last checkpoint, the measurement window resets — behavioral memory from the
+// last checkpoint, the measurement window resets — vitals from the
 // old version is discarded. This ensures stats reflect the current code, not
 // historical behavior from a different implementation.
 //
@@ -319,7 +319,7 @@ func printProjectStats(results []blockStatRow) {
 // other blocks' logs for tool.call events that reference this block. Pass nil to
 // skip this (e.g., the auto-update path in dispatchBlock, where per-run cross-scans
 // would be too expensive).
-func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBlock) *BehavioralMemory {
+func computeVitals(block *DiscoveredBlock, allBlocks []*DiscoveredBlock) *Vitals {
 	// Read logs from .aglet/ path, fall back to old block directory for migration
 	logPath := filepath.Join(block.AgletDir, "logs.jsonl")
 	rawData, err := os.ReadFile(logPath)
@@ -330,7 +330,7 @@ func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBloc
 	}
 	if err != nil {
 		// No logs yet — block exists but has never been run
-		return &BehavioralMemory{
+		return &Vitals{
 			WarmthLevel: "cold",
 			WarmthScore: 0,
 			LastUpdated: time.Now().UTC().Format(time.RFC3339),
@@ -359,9 +359,9 @@ func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBloc
 	}
 
 	// --- Step 2: Determine accumulation mode ---
-	// If there's existing behavioral_memory and no code change since last stats run → incremental.
+	// If there's existing vitals and no code change since last stats run → incremental.
 	// Otherwise → reset from zero (or from the resetTime forward).
-	existing := block.BehavioralMemory
+	existing := block.Vitals
 	var windowStart time.Time // zero = process all entries
 	doReset := true
 	if existing != nil && existing.LastUpdated != "" {
@@ -480,7 +480,7 @@ func computeBehavioralMemory(block *DiscoveredBlock, allBlocks []*DiscoveredBloc
 	totalTokens := baseTokens + deltaTokens
 	totalTokenCount := baseTokenCount + deltaTokenCount
 
-	mem := &BehavioralMemory{
+	mem := &Vitals{
 		TotalCalls:   totalCalls,
 		LastUpdated:  time.Now().UTC().Format(time.RFC3339),
 		VersionSince: versionSince,
@@ -596,7 +596,7 @@ func computeWarmth(totalCalls int, lastCalled time.Time) (float64, string) {
 }
 
 // printBlockStats renders a human-readable behavioral snapshot for a single Block.
-func printBlockStats(name string, mem *BehavioralMemory) {
+func printBlockStats(name string, mem *Vitals) {
 	fmt.Printf("Block: %s\n", name)
 	fmt.Println(strings.Repeat("─", 38))
 	fmt.Printf("  %-14s %s  (%.2f)\n", "Warmth", padRight(mem.WarmthLevel, 4), mem.WarmthScore)
@@ -664,28 +664,132 @@ func formatToolMap(m map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// writeBehavioralMemory writes the behavioral_memory section into a Block's block.yaml.
-// It replaces any existing behavioral_memory section, or appends one if absent.
+// writeVitals writes the vitals section into a Block's block.yaml.
+// It replaces any existing vitals section, or appends one if absent.
 // All developer-declared fields above the section are preserved exactly.
-// writeBehavioralMemory writes the behavioral profile to .aglet/{blockName}/memory.json.
-// This is the only write path for behavioral memory — block.yaml is never touched.
-func writeBehavioralMemory(block *DiscoveredBlock, mem *BehavioralMemory) error {
+// writeVitals writes the vitals to .aglet/{blockName}/vitals.json.
+// This is the only write path for vitals — block.yaml is never touched.
+func writeVitals(block *DiscoveredBlock, mem *Vitals) error {
 	if block.AgletDir == "" {
 		return fmt.Errorf("AgletDir not set for block '%s'", block.Config.Name)
 	}
 
 	EnsureAgletDir(block.AgletDir)
 
-	memPath := filepath.Join(block.AgletDir, "memory.json")
+	memPath := filepath.Join(block.AgletDir, "vitals.json")
 	data, err := json.MarshalIndent(mem, "", "  ")
 	if err != nil {
-		return fmt.Errorf("could not marshal behavioral memory: %w", err)
+		return fmt.Errorf("could not marshal vitals: %w", err)
 	}
 
 	// Also update the in-memory reference
-	block.BehavioralMemory = mem
+	block.Vitals = mem
 
 	return os.WriteFile(memPath, data, 0644)
+}
+
+// incrementVitals updates the block's vitals incrementally after a single execution.
+// Instead of re-scanning logs (O(n)), it increments counters directly from what
+// the wrapper already knows (O(1)). Called by the wrapper after every execution.
+func incrementVitals(block *DiscoveredBlock, durationMs int64, isError bool, meta map[string]interface{}) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Start from existing vitals or create fresh
+	v := block.Vitals
+	if v == nil {
+		v = &Vitals{}
+	}
+
+	// Increment call count
+	v.TotalCalls++
+
+	// Update running average for duration
+	// new_avg = ((old_avg * (n-1)) + new_value) / n
+	if v.TotalCalls == 1 {
+		v.AvgRuntimeMs = float64(durationMs)
+	} else {
+		v.AvgRuntimeMs = ((v.AvgRuntimeMs * float64(v.TotalCalls-1)) + float64(durationMs)) / float64(v.TotalCalls)
+	}
+
+	// Update error rate
+	if isError {
+		// Recompute: total_errors = error_rate * (total_calls - 1) + 1
+		totalErrors := v.ErrorRate*float64(v.TotalCalls-1) + 1
+		v.ErrorRate = totalErrors / float64(v.TotalCalls)
+	} else {
+		// Recompute: total_errors = error_rate * (total_calls - 1)
+		totalErrors := v.ErrorRate * float64(v.TotalCalls-1)
+		v.ErrorRate = totalErrors / float64(v.TotalCalls)
+	}
+
+	// Round error rate to 4 decimal places
+	v.ErrorRate = math.Round(v.ErrorRate*10000) / 10000
+
+	// Update timestamps
+	v.LastCalled = now
+	v.LastUpdated = now
+
+	// Update token average from executor metadata (reasoning blocks only)
+	if meta != nil {
+		inputTokens, _ := meta["input_tokens"].(int)
+		outputTokens, _ := meta["output_tokens"].(int)
+		if inputTokens > 0 || outputTokens > 0 {
+			totalTokens := inputTokens + outputTokens
+			if v.TotalCalls == 1 {
+				v.TokenAvg = totalTokens
+			} else {
+				v.TokenAvg = ((v.TokenAvg * (v.TotalCalls - 1)) + totalTokens) / v.TotalCalls
+			}
+		}
+	}
+
+	// Recompute warmth from updated values
+	v.WarmthScore, v.WarmthLevel = computeWarmthFromValues(v.TotalCalls, v.LastCalled)
+
+	// Round runtime to 1 decimal
+	v.AvgRuntimeMs = math.Round(v.AvgRuntimeMs*10) / 10
+
+	return writeVitals(block, v)
+}
+
+// computeWarmthFromValues computes warmth score and level from call count and last called time.
+func computeWarmthFromValues(totalCalls int, lastCalled string) (float64, string) {
+	// Recency: exponential decay from last call
+	recency := 0.0
+	if lastCalled != "" {
+		if t, err := time.Parse(time.RFC3339, lastCalled); err == nil {
+			hours := time.Since(t).Hours()
+			switch {
+			case hours < 1:
+				recency = 1.0
+			case hours < 24:
+				recency = 0.9
+			case hours < 24*7:
+				recency = 0.7
+			case hours < 24*30:
+				recency = 0.4
+			case hours < 24*365:
+				recency = 0.1
+			}
+		}
+	}
+
+	// Frequency: normalized against 100 calls baseline (capped at 1.0)
+	frequency := float64(totalCalls) / 100.0
+	if frequency > 1.0 {
+		frequency = 1.0
+	}
+
+	score := math.Round((recency*0.7+frequency*0.3)*100) / 100
+
+	level := "cold"
+	if score >= 0.7 {
+		level = "hot"
+	} else if score >= 0.3 {
+		level = "warm"
+	}
+
+	return score, level
 }
 
 // formatTokens formats a token count as a human-readable string (1.2M, 800K, etc.)
