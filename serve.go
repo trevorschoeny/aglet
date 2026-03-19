@@ -105,8 +105,9 @@ func StartDevServer(projectRoot string, rootDomain *DomainYaml, port int) error 
 
 	// SDK interaction events endpoint — receives batched client-side events
 	// from the @aglet/sdk and appends them to the surface's logs.jsonl.
+	agletSurfaceDir := ResolveAgletDirForSurface(surfaceDir, surfaceName, projectRoot)
 	mux.HandleFunc("/_aglet/events", func(w http.ResponseWriter, r *http.Request) {
-		handleInteractionEvents(w, r, surfaceDir)
+		handleInteractionEvents(w, r, agletSurfaceDir)
 	})
 
 	// CORS middleware for local development
@@ -169,10 +170,11 @@ func handleContractBlockRequest(w http.ResponseWriter, r *http.Request, blockNam
 	// The wrapper uses this to write contract.call entries to the surface's logs.
 	caller := r.Header.Get("X-Aglet-Caller")
 	surfaceCtx := &SurfaceCallContext{
-		SurfaceDir:  surfaceDir,
-		SurfaceName: surfaceName,
-		Caller:      caller,
-		Contract:    contractName,
+		SurfaceDir:      surfaceDir,
+		SurfaceName:     surfaceName,
+		Caller:          caller,
+		Contract:        contractName,
+		AgletSurfaceDir: ResolveAgletDirForSurface(surfaceDir, surfaceName, projectRoot),
 	}
 
 	opts := WrapBlockOptions{
@@ -293,7 +295,7 @@ func parseSurfaceContract(path string) (map[string]ContractDependency, error) {
 // Request body is a JSON array of interaction events:
 //
 //	[{"event":"interaction","timestamp":"...","caller":"FeedbackPanel","surface":"Dashboard","action":"button_click"}]
-func handleInteractionEvents(w http.ResponseWriter, r *http.Request, surfaceDir string) {
+func handleInteractionEvents(w http.ResponseWriter, r *http.Request, agletSurfaceDir string) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -317,8 +319,9 @@ func handleInteractionEvents(w http.ResponseWriter, r *http.Request, surfaceDir 
 		return
 	}
 
-	// Append each event to the surface's logs.jsonl
-	logPath := filepath.Join(surfaceDir, "logs.jsonl")
+	// Append each event to the surface's .aglet/ logs
+	EnsureAgletDir(agletSurfaceDir)
+	logPath := filepath.Join(agletSurfaceDir, "logs.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "could not open log: %s"}`, err), http.StatusInternalServerError)

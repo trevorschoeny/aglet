@@ -199,7 +199,7 @@ func runAnthropicReasoning(block *DiscoveredBlock, provider *ResolvedProvider, m
 			// Tool-level logging stays here because it's part of the execution
 			// flow: the reasoning block is mid-thought, calling tools, continuing.
 			// The wrapper can't know about individual tool calls.
-			logToolCall(block, content.Name, i)
+			logToolCall(block, content.Name, i, "")
 			toolStart := time.Now()
 
 			toolInput, err := json.Marshal(content.Input)
@@ -212,10 +212,10 @@ func runAnthropicReasoning(block *DiscoveredBlock, provider *ResolvedProvider, m
 
 			var resultContent interface{}
 			if err != nil {
-				logToolResult(block, content.Name, toolDurationMs, false)
+				logToolResult(block, content.Name, toolDurationMs, false, "")
 				resultContent = fmt.Sprintf("Tool error: %s", err.Error())
 			} else {
-				logToolResult(block, content.Name, toolDurationMs, true)
+				logToolResult(block, content.Name, toolDurationMs, true, "")
 				resultContent = string(toolResult)
 			}
 
@@ -369,7 +369,7 @@ func runOpenAIReasoning(block *DiscoveredBlock, provider *ResolvedProvider, mode
 
 		// Execute each tool call — tool-level logging stays here
 		for _, tc := range choice.Message.ToolCalls {
-			logToolCall(block, tc.Function.Name, i)
+			logToolCall(block, tc.Function.Name, i, "")
 			toolStart := time.Now()
 
 			toolResult, err := executeToolBlock(tc.Function.Name, []byte(tc.Function.Arguments), rootDomain, projectRoot)
@@ -377,10 +377,10 @@ func runOpenAIReasoning(block *DiscoveredBlock, provider *ResolvedProvider, mode
 
 			var resultStr string
 			if err != nil {
-				logToolResult(block, tc.Function.Name, toolDurationMs, false)
+				logToolResult(block, tc.Function.Name, toolDurationMs, false, "")
 				resultStr = fmt.Sprintf("Tool error: %s", err.Error())
 			} else {
-				logToolResult(block, tc.Function.Name, toolDurationMs, true)
+				logToolResult(block, tc.Function.Name, toolDurationMs, true, "")
 				resultStr = string(toolResult)
 			}
 

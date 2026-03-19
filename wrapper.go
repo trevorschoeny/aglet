@@ -47,10 +47,11 @@ type WrapBlockOptions struct {
 // SurfaceCallContext carries information about a surface contract call.
 // Populated from X-Aglet-Surface and X-Aglet-Caller HTTP headers.
 type SurfaceCallContext struct {
-	SurfaceDir  string // Absolute path to the surface directory (for writing logs)
-	SurfaceName string // Surface name (from surface.yaml)
-	Caller      string // Component name that initiated the call (from X-Aglet-Caller header)
-	Contract    string // Contract dependency name (e.g., "Sentiment")
+	SurfaceDir      string // Absolute path to the surface directory (source)
+	SurfaceName     string // Surface name (from surface.yaml)
+	Caller          string // Component name that initiated the call (from X-Aglet-Caller header)
+	Contract        string // Contract dependency name (e.g., "Sentiment")
+	AgletSurfaceDir string // Absolute path to .aglet/{surfaceName}/ for runtime logs
 }
 
 // DefaultWrapOptions returns the standard wrapper options: forwarding enabled, no surface context.
@@ -63,6 +64,14 @@ func WrapBlock(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot strin
 }
 
 func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projectRoot string, input []byte, opts WrapBlockOptions) ([]byte, error) {
+	// --- Step 0: Resolve .aglet/ path and sink ---
+	// Ensure the block has its AgletDir set. If discovery didn't set it
+	// (e.g., direct FindBlock call), resolve it now.
+	if block.AgletDir == "" {
+		block.AgletDir = ResolveAgletDirForBlock(block.Dir, block.Config.Name, projectRoot)
+	}
+	sink := ResolveSink(block, projectRoot)
+
 	// --- Step 1: Detect code changes ---
 	// If the implementation file hash has changed since the last logged run,
 	// emit a block.updated event. This is an observability concern — the
@@ -77,7 +86,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 
 	// --- Step 3: Log block.start (if observe contract allows it) ---
 	if shouldLog(block, "start") {
-		logBlockStart(block, version, startMeta)
+		logBlockStart(block, version, startMeta, sink)
 	}
 	startTime := time.Now()
 
@@ -117,7 +126,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	// library output, warnings — anything the block wrote to stderr
 	// during execution, regardless of exit code.
 	if result.Stderr != "" {
-		logApplicationStderr(block, result.Stderr)
+		logApplicationStderr(block, result.Stderr, sink)
 		// Also print stderr to the CLI's stderr so the developer sees it
 		fmt.Fprint(os.Stderr, result.Stderr)
 	}
@@ -131,7 +140,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	// --- Step 8: Log completion or error (if observe contract allows it) ---
 	if result.Error != nil {
 		if shouldLog(block, "error") {
-			logBlockError(block, result.Error.Error(), logMeta)
+			logBlockError(block, result.Error.Error(), logMeta, sink)
 		}
 
 		// Log the failed contract call to the surface's logs.jsonl
@@ -143,7 +152,7 @@ func WrapBlockWithOptions(block *DiscoveredBlock, rootDomain *DomainYaml, projec
 	}
 
 	if shouldLog(block, "complete") {
-		logBlockComplete(block, durationMs, len(result.Output), result.Meta)
+		logBlockComplete(block, durationMs, len(result.Output), result.Meta, sink)
 	}
 
 	// --- Step 8.5: Log contract call to surface ---

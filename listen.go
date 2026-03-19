@@ -110,10 +110,11 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 		if surface != nil {
 			caller := r.Header.Get("X-Aglet-Caller")
 			opts.SurfaceContext = &SurfaceCallContext{
-				SurfaceDir:  surfaceDir,
-				SurfaceName: surface.Name,
-				Caller:      caller,
-				Contract:    blockName,
+				SurfaceDir:      surfaceDir,
+				SurfaceName:     surface.Name,
+				Caller:          caller,
+				Contract:        blockName,
+				AgletSurfaceDir: ResolveAgletDirForSurface(surfaceDir, surface.Name, projectRoot),
 			}
 		}
 
@@ -157,8 +158,9 @@ func StartDomainListener(domainDir string, rootDomain *DomainYaml, projectRoot s
 		}
 
 		// SDK interaction events endpoint
+		agletSurfaceDir := ResolveAgletDirForSurface(surfaceDir, surface.Name, projectRoot)
 		mux.HandleFunc("/_aglet/events", func(w http.ResponseWriter, r *http.Request) {
-			handleInteractionEvents(w, r, surfaceDir)
+			handleInteractionEvents(w, r, agletSurfaceDir)
 		})
 	}
 

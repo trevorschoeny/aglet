@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,9 +78,14 @@ func resolveGitVersion(filePath string) *GitVersion {
 }
 
 // getLastLoggedHash reads the most recent file_hash from a Block's logs.jsonl.
-// Returns empty string if no previous logs exist.
+// Returns empty string if no previous logs exist. Reads from .aglet/ first,
+// falls back to the block directory for migration compatibility.
 func getLastLoggedHash(block *DiscoveredBlock) string {
-	logPath := filepath.Join(block.Dir, "logs.jsonl")
+	logPath := filepath.Join(block.AgletDir, "logs.jsonl")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		// Fallback: check old location in block directory
+		logPath = filepath.Join(block.Dir, "logs.jsonl")
+	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		return ""
@@ -143,14 +150,14 @@ func checkAndLogUpdate(block *DiscoveredBlock) *GitVersion {
 			"commit_author":  version.CommitAuthor,
 			"dirty":          version.Dirty,
 		}
-		appendLog(block, entry)
+		appendLog(block.AgletDir, entry, "")
 	}
 
 	return version
 }
 
-// logBlockStart writes a block.start event.
-func logBlockStart(block *DiscoveredBlock, version *GitVersion, extra LogEntry) {
+// logBlockStart writes a block.start event to .aglet/{blockName}/logs.jsonl.
+func logBlockStart(block *DiscoveredBlock, version *GitVersion, extra LogEntry, sink string) {
 	entry := LogEntry{
 		"event":     "block.start",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -167,11 +174,11 @@ func logBlockStart(block *DiscoveredBlock, version *GitVersion, extra LogEntry) 
 	for k, v := range extra {
 		entry[k] = v
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
-// logBlockComplete writes a block.complete event.
-func logBlockComplete(block *DiscoveredBlock, durationMs int64, outputBytes int, extra LogEntry) {
+// logBlockComplete writes a block.complete event to .aglet/{blockName}/logs.jsonl.
+func logBlockComplete(block *DiscoveredBlock, durationMs int64, outputBytes int, extra LogEntry, sink string) {
 	entry := LogEntry{
 		"event":        "block.complete",
 		"timestamp":    time.Now().UTC().Format(time.RFC3339),
@@ -185,11 +192,11 @@ func logBlockComplete(block *DiscoveredBlock, durationMs int64, outputBytes int,
 	for k, v := range extra {
 		entry[k] = v
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
-// logBlockError writes a block.error event.
-func logBlockError(block *DiscoveredBlock, errMsg string, extra LogEntry) {
+// logBlockError writes a block.error event to .aglet/{blockName}/logs.jsonl.
+func logBlockError(block *DiscoveredBlock, errMsg string, extra LogEntry, sink string) {
 	entry := LogEntry{
 		"event":    "block.error",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -202,11 +209,11 @@ func logBlockError(block *DiscoveredBlock, errMsg string, extra LogEntry) {
 	for k, v := range extra {
 		entry[k] = v
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
 // logToolCall writes a tool.call event during reasoning.
-func logToolCall(block *DiscoveredBlock, toolName string, iteration int) {
+func logToolCall(block *DiscoveredBlock, toolName string, iteration int, sink string) {
 	entry := LogEntry{
 		"event":     "tool.call",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -217,11 +224,11 @@ func logToolCall(block *DiscoveredBlock, toolName string, iteration int) {
 		"tool":      toolName,
 		"iteration": iteration,
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
 // logToolResult writes a tool.result event during reasoning.
-func logToolResult(block *DiscoveredBlock, toolName string, durationMs int64, success bool) {
+func logToolResult(block *DiscoveredBlock, toolName string, durationMs int64, success bool, sink string) {
 	status := "success"
 	if !success {
 		status = "error"
@@ -236,11 +243,11 @@ func logToolResult(block *DiscoveredBlock, toolName string, durationMs int64, su
 		"tool":        toolName,
 		"duration_ms": durationMs,
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
 // logApplicationStderr writes application-level stderr output.
-func logApplicationStderr(block *DiscoveredBlock, stderr string) {
+func logApplicationStderr(block *DiscoveredBlock, stderr string, sink string) {
 	if strings.TrimSpace(stderr) == "" {
 		return
 	}
@@ -253,7 +260,7 @@ func logApplicationStderr(block *DiscoveredBlock, stderr string) {
 		"block_id":  block.Config.ID,
 		"message":   strings.TrimSpace(stderr),
 	}
-	appendLog(block, entry)
+	appendLog(block.AgletDir, entry, sink)
 }
 
 // logContractCall writes a contract.call event to a surface's logs.jsonl.
@@ -261,7 +268,7 @@ func logApplicationStderr(block *DiscoveredBlock, stderr string) {
 // the request — the wrapper is the block's network-facing layer, so writing
 // to the surface's log is a natural part of its role.
 func logContractCall(ctx *SurfaceCallContext, blockName string, durationMs int64, success bool, errMsg string) {
-	if ctx == nil || ctx.SurfaceDir == "" {
+	if ctx == nil || ctx.AgletSurfaceDir == "" {
 		return
 	}
 
@@ -285,26 +292,17 @@ func logContractCall(ctx *SurfaceCallContext, blockName string, durationMs int64
 		entry["error"] = errMsg
 	}
 
-	// Write to the surface's logs.jsonl (not the block's)
-	logPath := filepath.Join(ctx.SurfaceDir, "logs.jsonl")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[aglet] warning: could not write surface log to %s: %v\n", logPath, err)
-		return
-	}
-	defer f.Close()
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-	f.Write(data)
-	f.WriteString("\n")
+	// Write to the surface's .aglet/ logs (not the block's or the source surface dir)
+	appendLog(ctx.AgletSurfaceDir, entry, "")
 }
 
-// appendLog writes a JSON log entry to the Block's logs.jsonl.
-func appendLog(block *DiscoveredBlock, entry LogEntry) {
-	logPath := filepath.Join(block.Dir, "logs.jsonl")
+// appendLog writes a JSON log entry to logs.jsonl in the given aglet unit directory.
+// If sink is a URL (starts with http), the entry is also forwarded there in a goroutine.
+func appendLog(agletUnitDir string, entry LogEntry, sink string) {
+	// Ensure the directory exists (auto-create on first write)
+	EnsureAgletDir(agletUnitDir)
+
+	logPath := filepath.Join(agletUnitDir, "logs.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		// Best-effort logging — don't let log failures break execution
@@ -319,4 +317,19 @@ func appendLog(block *DiscoveredBlock, entry LogEntry) {
 	}
 	f.Write(data)
 	f.WriteString("\n")
+
+	// Forward to remote sink if configured
+	if strings.HasPrefix(sink, "http://") || strings.HasPrefix(sink, "https://") {
+		go forwardToSink(sink, data)
+	}
+}
+
+// forwardToSink sends a log entry to a remote sink URL.
+// Fire-and-forget — failures are silent (local write already succeeded).
+func forwardToSink(sinkURL string, data []byte) {
+	resp, err := http.Post(sinkURL, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return // silent failure
+	}
+	resp.Body.Close()
 }
