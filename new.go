@@ -130,6 +130,11 @@ func newDomain(dir, name string, flags newFlags, cwd string) error {
 		return err
 	}
 
+	// Initialize .aglet/ runtime data directory with its own git repo
+	if err := InitAgletRepo(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not initialize .aglet/: %s\n", err)
+	}
+
 	printCreated("domain", name, "", dir)
 	return nil
 }
@@ -248,7 +253,6 @@ schema:
     required: []
 
 observe:
-  log: ./logs.jsonl
   events: %s
 `, uuid, name, domain, role, runtime, runtimeLines.String(), observeEvents)
 }
@@ -407,6 +411,9 @@ name: %s%s
 # listen: true
 # peers:
 #   other-domain: "http://localhost:8081"
+
+aglet:
+  sink: local
 `, uuid, name, parentLine)
 }
 

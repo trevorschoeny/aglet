@@ -63,11 +63,25 @@ func handleInit() {
 		os.Exit(1)
 	}
 
+	// Write .gitignore — exclude .aglet/ runtime data from main repo
+	gitignorePath := filepath.Join(projectDir, ".gitignore")
+	gitignoreContent := "# Aglet runtime data (logs + behavioral memory) — has its own git repo\n.aglet/\n\n# Common excludes\nnode_modules/\ndist/\n"
+	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not write .gitignore: %s\n", err)
+	}
+
+	// Initialize .aglet/ runtime data directory with its own git repo
+	if err := InitAgletRepo(projectDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not initialize .aglet/: %s\n", err)
+	}
+
 	// Report what was created
 	fmt.Fprintf(os.Stderr, "[aglet init] Created project '%s'\n", projectName)
 	fmt.Fprintf(os.Stderr, "  %s/domain.yaml\n", projectName)
 	fmt.Fprintf(os.Stderr, "  %s/intent.md\n", projectName)
 	fmt.Fprintf(os.Stderr, "  %s/CLAUDE.md\n", projectName)
+	fmt.Fprintf(os.Stderr, "  %s/.gitignore\n", projectName)
+	fmt.Fprintf(os.Stderr, "  %s/.aglet/              (runtime data — own git repo)\n", projectName)
 	fmt.Fprintf(os.Stderr, "\nNext steps:\n")
 	fmt.Fprintf(os.Stderr, "  cd %s\n", projectName)
 	fmt.Fprintf(os.Stderr, "  Edit intent.md          — define your project's north star\n")
@@ -112,7 +126,10 @@ runners:
 #   openai:
 #     env: OPENAI_API_KEY
 
-%s`, uuid, name, defaultsLines.String())
+%s
+aglet:
+  sink: local
+`, uuid, name, defaultsLines.String())
 }
 
 // rootDomainIntent produces the content of the root intent.md for a new project.

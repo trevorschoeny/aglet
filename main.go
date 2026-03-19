@@ -45,6 +45,8 @@ func main() {
 		handleStats()
 	case "version":
 		handleVersion()
+	case "snapshot":
+		handleSnapshot()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
 		printUsage()
@@ -65,6 +67,7 @@ Commands:
   new <type> <name> [flags]             Scaffold a new Block, Domain, Surface, or Component
   stats [BlockName] [--domain D] [--project] [--write] [--json]  Behavioral memory from logs
   validate [--deep] [--unit NAME] [--json]  Validate project structure and consistency
+  snapshot                              Commit behavioral memory in .aglet/ repos
   version                               Print the aglet version
 
 `)
